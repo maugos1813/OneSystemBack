@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: onesystem
+      POSTGRES_PASSWORD: onesystem
+      POSTGRES_DB: onesystem
+    ports:
+      # Host 5433 -> container 5432: 5432 is already taken by a local Postgres install.
+      - "5433:5432"
+    volumes:
+      - onesystem_pgdata:/home/postgres/pgdata/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onesystem -d onesystem"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  onesystem_pgdata:
