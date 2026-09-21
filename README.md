@@ -90,9 +90,33 @@ Todas las rutas (salvo `/auth/*` y `/health`) requieren `Authorization: Bearer <
 ## Despliegue
 
 El servidor TCP necesita un **puerto público persistente** (no es compatible con
-plataformas serverless). Ver `Dockerfile` para el build de producción. Se recomienda un
-VPS/contenedor con el puerto `TCP_PORT` expuesto (DigitalOcean/Hetzner Droplet, AWS
-Lightsail/EC2, Fly.io, etc.), apuntando ahí la configuración del dispositivo.
+plataformas serverless ni con Render, que solo soporta HTTP/WebSocket). Este proyecto
+está pensado para desplegarse en **Railway**, que soporta exponer HTTP y TCP Proxy en el
+mismo servicio.
+
+### Pasos en Railway
+
+1. **Base de datos**: en el dashboard de Railway, `New` → `Template` → buscar
+   "TimescaleDB + PostGIS" y desplegarla como servicio. Copiar su `DATABASE_URL` (o las
+   credenciales individuales) desde la pestaña `Variables` de ese servicio.
+2. **Backend**: `New` → `GitHub Repo` → elegir `maugos1813/OneSystemBack` (rama
+   `Maudev`). Railway detecta el `Dockerfile` automáticamente (hay un `railway.json` con
+   la config de build/healthcheck).
+3. **Variables de entorno** del servicio backend:
+   - `DATABASE_URL`: la del paso 1 (usar el host/puerto **interno** de Railway,
+     `*.railway.internal`, para que el tráfico no salga a internet).
+   - `JWT_SECRET`: un secreto fuerte (no reusar el de `.env.example`).
+   - `TCP_PORT=5027`, `HTTP_PORT=3000`, `TCP_HOST=0.0.0.0`, `HTTP_HOST=0.0.0.0`,
+     `LOG_LEVEL=info`.
+4. **Networking** del servicio backend (pestaña `Settings` → `Networking`):
+   - Generar un dominio HTTP público apuntando al puerto `3000` (para la API/WebSocket).
+   - Habilitar **TCP Proxy** apuntando al puerto `5027` (para que el FMB204 se conecte).
+     Railway asigna un host y puerto propios (ej. `xxxx.proxy.rlwy.net:12345`) — ese es
+     el `Domain/IP` y `Puerto` que hay que cargar en el dispositivo.
+5. **Migraciones**: instalar el [Railway CLI](https://docs.railway.com/guides/cli),
+   `railway link` al proyecto, y correr `railway run npm run db:migrate` (esto ejecuta
+   el script localmente pero con el `DATABASE_URL` real inyectado — no hace falta Docker
+   ni Postgres instalados en tu máquina).
 
 ## Fuera de alcance (por ahora)
 
