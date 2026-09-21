@@ -97,26 +97,41 @@ mismo servicio.
 ### Pasos en Railway
 
 1. **Base de datos**: en el dashboard de Railway, `New` → `Template` → buscar
-   "TimescaleDB + PostGIS" y desplegarla como servicio. Copiar su `DATABASE_URL` (o las
-   credenciales individuales) desde la pestaña `Variables` de ese servicio.
+   "TimescaleDB + PostGIS" y desplegarla como servicio (por defecto queda nombrado
+   `TimescaleDB`). Ese template **no expone** una variable `DATABASE_URL` propia — solo
+   las partes sueltas (`PGUSER`, `PGPASSWORD`, `PGHOST`, `PGPORT`, `PGDATABASE`).
 2. **Backend**: `New` → `GitHub Repo` → elegir `maugos1813/OneSystemBack` (rama
    `Maudev`). Railway detecta el `Dockerfile` automáticamente (hay un `railway.json` con
    la config de build/healthcheck).
-3. **Variables de entorno** del servicio backend:
-   - `DATABASE_URL`: la del paso 1 (usar el host/puerto **interno** de Railway,
-     `*.railway.internal`, para que el tráfico no salga a internet).
-   - `JWT_SECRET`: un secreto fuerte (no reusar el de `.env.example`).
-   - `TCP_PORT=5027`, `HTTP_PORT=3000`, `TCP_HOST=0.0.0.0`, `HTTP_HOST=0.0.0.0`,
-     `LOG_LEVEL=info`.
+3. **Variables de entorno** del servicio backend (pestaña `Variables` → `Raw Editor`,
+   sin comillas alrededor de las referencias — Railway las vuelve a mostrar con comillas
+   al releer, es solo cosmético):
+   ```
+   DATABASE_URL=postgresql://${{TimescaleDB.PGUSER}}:${{TimescaleDB.PGPASSWORD}}@${{TimescaleDB.PGHOST}}:${{TimescaleDB.PGPORT}}/${{TimescaleDB.PGDATABASE}}
+   JWT_SECRET=<un secreto fuerte, no reusar el de .env.example>
+   TCP_PORT=5027
+   HTTP_PORT=3000
+   TCP_HOST=0.0.0.0
+   HTTP_HOST=0.0.0.0
+   LOG_LEVEL=info
+   ```
+   Si el servicio de la base no se llama exactamente `TimescaleDB` en tu dashboard,
+   ajustá el nombre en cada referencia.
 4. **Networking** del servicio backend (pestaña `Settings` → `Networking`):
    - Generar un dominio HTTP público apuntando al puerto `3000` (para la API/WebSocket).
    - Habilitar **TCP Proxy** apuntando al puerto `5027` (para que el FMB204 se conecte).
      Railway asigna un host y puerto propios (ej. `xxxx.proxy.rlwy.net:12345`) — ese es
      el `Domain/IP` y `Puerto` que hay que cargar en el dispositivo.
-5. **Migraciones**: instalar el [Railway CLI](https://docs.railway.com/guides/cli),
-   `railway link` al proyecto, y correr `railway run npm run db:migrate` (esto ejecuta
-   el script localmente pero con el `DATABASE_URL` real inyectado — no hace falta Docker
-   ni Postgres instalados en tu máquina).
+5. **Migraciones**: `timescaledb.railway.internal` es un host de **red privada**, solo
+   resoluble entre servicios de Railway — no desde tu máquina, ni siquiera con
+   `railway run`. Para correr la migración una vez:
+   - En el servicio `TimescaleDB` → `Settings` → `Networking` → `+ TCP Proxy` sobre el
+     puerto `5432` → `Deploy` los cambios pendientes. Copiá el host:puerto público que
+     asigna.
+   - Localmente: `DATABASE_URL="postgresql://<PGUSER>:<PGPASSWORD>@<host-del-proxy>:<puerto-del-proxy>/<PGDATABASE>" npm run db:migrate`
+     (los valores reales están en `Variables` del servicio `TimescaleDB`).
+   - Después de confirmar que corrió bien, **borrá ese TCP Proxy** de la base — el
+     backend sigue hablándole por red privada sin él.
 
 ## Fuera de alcance (por ahora)
 
