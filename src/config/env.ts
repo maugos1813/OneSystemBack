@@ -8,6 +8,8 @@ const envSchema = z.object({
   HTTP_HOST: z.string().default("0.0.0.0"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),
+  // Comma-separated list of origins allowed to call the API from a browser (the frontend's URL(s)).
+  CORS_ORIGIN: z.string().default("http://localhost:5173"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 

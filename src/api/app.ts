@@ -1,3 +1,4 @@
+import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import Fastify from "fastify";
 import { env } from "../config/env.js";
@@ -11,6 +12,9 @@ import { vehiclesRoutes } from "./routes/vehicles.routes.js";
 
 export async function buildApp() {
   const app = Fastify({ loggerInstance: logger });
+
+  const corsOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim());
+  await app.register(cors, { origin: corsOrigins });
 
   await app.register(jwt, { secret: env.JWT_SECRET });
 
