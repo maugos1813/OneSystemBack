@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { getLatestPosition, getPositionHistory } from "../../services/position.service.js";
+import {
+  getDeviceEvents,
+  getLatestPosition,
+  getPositionHistory,
+} from "../../services/position.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
@@ -8,6 +12,12 @@ const historyQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   limit: z.coerce.number().int().positive().max(5000).optional(),
+});
+
+const eventsQuerySchema = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  limit: z.coerce.number().int().positive().max(1000).optional(),
 });
 
 export async function positionsRoutes(app: FastifyInstance): Promise<void> {
@@ -34,5 +44,17 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
     if (!vehicle.deviceId) return reply.code(404).send({ error: "Vehicle has no device assigned" });
 
     return getPositionHistory({ deviceId: vehicle.deviceId, ...parsed.data });
+  });
+
+  app.get("/vehicles/:id/events", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = eventsQuerySchema.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const vehicle = await getVehicleForOrg(request.user.orgId, id);
+    if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
+    if (!vehicle.deviceId) return reply.code(404).send({ error: "Vehicle has no device assigned" });
+
+    return getDeviceEvents({ deviceId: vehicle.deviceId, ...parsed.data });
   });
 }

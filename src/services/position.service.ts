@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, lte } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { deviceEvents, positions, type Position } from "../db/schema/index.js";
+import { deviceEvents, positions, type DeviceEvent, type Position } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { serializeIoElements } from "../tcp-server/codec8/ioSerialize.js";
 import type { AvlRecord } from "../tcp-server/codec8/types.js";
@@ -90,4 +90,29 @@ export async function getPositionHistory({
     .where(and(...conditions))
     .orderBy(desc(positions.ts))
     .limit(Math.min(limit, 5000));
+}
+
+export interface DeviceEventsQuery {
+  deviceId: string;
+  from?: Date;
+  to?: Date;
+  limit?: number;
+}
+
+export async function getDeviceEvents({
+  deviceId,
+  from,
+  to,
+  limit = 100,
+}: DeviceEventsQuery): Promise<DeviceEvent[]> {
+  const conditions = [eq(deviceEvents.deviceId, deviceId)];
+  if (from) conditions.push(gte(deviceEvents.ts, from));
+  if (to) conditions.push(lte(deviceEvents.ts, to));
+
+  return db
+    .select()
+    .from(deviceEvents)
+    .where(and(...conditions))
+    .orderBy(desc(deviceEvents.ts))
+    .limit(Math.min(limit, 1000));
 }
