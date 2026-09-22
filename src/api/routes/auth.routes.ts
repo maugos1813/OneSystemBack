@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { authenticate, registerOrganizationWithOwner } from "../../services/auth.service.js";
+import { authenticate, getCurrentUser, registerOrganizationWithOwner } from "../../services/auth.service.js";
+import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const registerSchema = z.object({
   orgName: z.string().min(2).max(200),
@@ -50,5 +51,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
     const token = app.jwt.sign({ userId: user.id, orgId: user.orgId, role: user.role });
     return reply.send({ token });
+  });
+
+  app.get("/me", { onRequest: requireAuth }, async (request, reply) => {
+    const me = await getCurrentUser(request.user.userId);
+    if (!me) return reply.code(404).send({ error: "User not found" });
+    return me;
   });
 }

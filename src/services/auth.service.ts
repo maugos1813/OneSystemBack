@@ -3,6 +3,30 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations, users, type User } from "../db/schema/index.js";
 
+export interface CurrentUser {
+  userId: string;
+  email: string;
+  role: User["role"];
+  orgId: string;
+  orgName: string;
+}
+
+export async function getCurrentUser(userId: string): Promise<CurrentUser | undefined> {
+  const [row] = await db
+    .select({
+      userId: users.id,
+      email: users.email,
+      role: users.role,
+      orgId: organizations.id,
+      orgName: organizations.name,
+    })
+    .from(users)
+    .innerJoin(organizations, eq(users.orgId, organizations.id))
+    .where(eq(users.id, userId))
+    .limit(1);
+  return row;
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return argon2.hash(password);
 }
