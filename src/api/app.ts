@@ -10,7 +10,9 @@ import { registerRealtimeGateway } from "../realtime/gateway.js";
 import { apiKeysRoutes } from "./routes/apiKeys.routes.js";
 import { authRoutes } from "./routes/auth.routes.js";
 import { devicesRoutes } from "./routes/devices.routes.js";
+import { geofencesRoutes } from "./routes/geofences.routes.js";
 import { positionsRoutes } from "./routes/positions.routes.js";
+import { settingsRoutes } from "./routes/settings.routes.js";
 import { vehiclesRoutes } from "./routes/vehicles.routes.js";
 
 export async function buildApp() {
@@ -39,6 +41,8 @@ export async function buildApp() {
         { name: "Devices", description: "Dispositivos GPS (FMB204)" },
         { name: "Vehicles", description: "Vehículos de la flota" },
         { name: "Positions", description: "Posiciones e histórico de recorrido" },
+        { name: "Settings", description: "Nombre de la organización, horario laboral y preferencias de alertas" },
+        { name: "Geofences", description: "Geocercas circulares para alertas de entrada/salida" },
       ],
       components: {
         securitySchemes: {
@@ -66,6 +70,8 @@ export async function buildApp() {
   await app.register(devicesRoutes);
   await app.register(vehiclesRoutes);
   await app.register(positionsRoutes);
+  await app.register(settingsRoutes);
+  await app.register(geofencesRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

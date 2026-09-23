@@ -90,6 +90,9 @@ servidor — ahí están todos los endpoints, sus parámetros y se pueden probar
 | GET | `/vehicles/:id/positions/latest` | Última posición conocida |
 | GET | `/vehicles/:id/positions?from=&to=&limit=` | Histórico |
 | GET | `/vehicles/:id/events?from=&to=&limit=` | Eventos (ignición/movimiento) |
+| GET/PATCH | `/settings` | Nombre de la organización, horario laboral y preferencias de alertas |
+| GET/POST | `/geofences` | CRUD de geocercas circulares (centro + radio) |
+| PATCH/DELETE | `/geofences/:id` | — |
 | WS | `/realtime/positions` | Stream de posiciones en vivo (requiere JWT) |
 
 Todas las rutas (salvo `/auth/*`, `/health` y `/docs`) requieren
