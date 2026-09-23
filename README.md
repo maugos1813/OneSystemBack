@@ -73,19 +73,32 @@ vinculadas a un vehículo.
 
 ## API (resumen)
 
+Documentación interactiva completa (OpenAPI/Swagger) en **`/docs`** una vez levantado el
+servidor — ahí están todos los endpoints, sus parámetros y se pueden probar en vivo.
+
 | Método | Ruta | Descripción |
 |---|---|---|
 | POST | `/auth/register` | Crea una organización + usuario owner, devuelve JWT |
 | POST | `/auth/login` | Login, devuelve JWT |
+| GET | `/me` | Datos del usuario/organización autenticados |
+| GET/POST | `/api-keys` | Listar/crear API keys de la organización (solo con JWT) |
+| DELETE | `/api-keys/:id` | Revocar una API key |
 | GET | `/devices` | Dispositivos de la organización |
 | POST | `/devices/claim` | Asocia un dispositivo (por IMEI) a la organización |
 | GET/POST | `/vehicles` | CRUD de vehículos |
 | GET/PATCH/DELETE | `/vehicles/:id` | — |
 | GET | `/vehicles/:id/positions/latest` | Última posición conocida |
 | GET | `/vehicles/:id/positions?from=&to=&limit=` | Histórico |
+| GET | `/vehicles/:id/events?from=&to=&limit=` | Eventos (ignición/movimiento) |
 | WS | `/realtime/positions` | Stream de posiciones en vivo (requiere JWT) |
 
-Todas las rutas (salvo `/auth/*` y `/health`) requieren `Authorization: Bearer <token>`.
+Todas las rutas (salvo `/auth/*`, `/health` y `/docs`) requieren
+`Authorization: Bearer <token>` — un JWT (login, para la app) o una **API key**
+(`osk_live_...`, creada en `/api-keys`, para integraciones de terceros). Ambos resuelven
+al mismo scoping por organización, así que cualquier endpoint que use datos de flota
+(dispositivos, vehículos, posiciones) funciona igual con cualquiera de los dos — la
+gestión de las keys en sí (`/api-keys`) es la única excepción, esa requiere JWT siempre,
+para que una key filtrada no pueda emitir keys nuevas.
 
 ## Despliegue
 
@@ -122,16 +135,14 @@ mismo servicio.
    - Habilitar **TCP Proxy** apuntando al puerto `5027` (para que el FMB204 se conecte).
      Railway asigna un host y puerto propios (ej. `xxxx.proxy.rlwy.net:12345`) — ese es
      el `Domain/IP` y `Puerto` que hay que cargar en el dispositivo.
-5. **Migraciones**: `timescaledb.railway.internal` es un host de **red privada**, solo
-   resoluble entre servicios de Railway — no desde tu máquina, ni siquiera con
-   `railway run`. Para correr la migración una vez:
-   - En el servicio `TimescaleDB` → `Settings` → `Networking` → `+ TCP Proxy` sobre el
-     puerto `5432` → `Deploy` los cambios pendientes. Copiá el host:puerto público que
-     asigna.
-   - Localmente: `DATABASE_URL="postgresql://<PGUSER>:<PGPASSWORD>@<host-del-proxy>:<puerto-del-proxy>/<PGDATABASE>" npm run db:migrate`
-     (los valores reales están en `Variables` del servicio `TimescaleDB`).
-   - Después de confirmar que corrió bien, **borrá ese TCP Proxy** de la base — el
-     backend sigue hablándole por red privada sin él.
+5. **Migraciones**: se aplican solas al arrancar (`src/index.ts` corre `drizzle-orm`'s
+   `migrate()` antes de levantar los servidores) — no hace falta ningún paso manual acá.
+   Si alguna vez necesitás correrlas a mano contra la base de Railway desde tu máquina,
+   `timescaledb.railway.internal` es un host de **red privada** (no resoluble desde
+   afuera, ni con `railway run`): abrí un **TCP Proxy** temporal sobre el puerto `5432`
+   del servicio `TimescaleDB` (`Settings` → `Networking` → `+ TCP Proxy`), usalo para
+   armar el `DATABASE_URL` y correr `npm run db:migrate`, y después borralo — el backend
+   sigue hablándole por red privada sin él.
 
 ## Fuera de alcance (por ahora)
 
