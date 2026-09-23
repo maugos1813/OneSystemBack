@@ -13,6 +13,11 @@ const envSchema = z.object({
   // Public base URL of this API, shown as the server in the OpenAPI docs (/docs).
   PUBLIC_API_URL: z.string().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  // Email alerts (Resend). Left unset, the alert scheduler still runs (so idling/geofence
+  // state keeps ticking) but silently skips sending — fine for local dev.
+  RESEND_API_KEY: z.string().optional(),
+  ALERT_EMAIL_FROM: z.string().default("OneSystem Alertas <onboarding@resend.dev>"),
+  ALERT_EVAL_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
 });
 
 const parsed = envSchema.safeParse(process.env);

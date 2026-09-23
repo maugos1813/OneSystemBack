@@ -29,6 +29,13 @@
       "when": 1790193987450,
       "tag": "0003_boring_mauler",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790196706038,
+      "tag": "0004_rich_korvac",
+      "breakpoints": true
     }
   ]
 }

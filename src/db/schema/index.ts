@@ -6,3 +6,4 @@ export * from "./positions.js";
 export * from "./deviceEvents.js";
 export * from "./apiKeys.js";
 export * from "./geofences.js";
+export * from "./alertNotifications.js";

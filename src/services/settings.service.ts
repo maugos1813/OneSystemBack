@@ -65,7 +65,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
 
 /** Merges stored settings over the defaults so the shape can grow (new alert types,
  * new preferences) without a migration touching every existing organization's row. */
-function withDefaults(stored: unknown): OrgSettings {
+export function withDefaults(stored: unknown): OrgSettings {
   const partial = (stored ?? {}) as Partial<OrgSettings>;
   return {
     workingHours: { ...DEFAULT_SETTINGS.workingHours, ...partial.workingHours },

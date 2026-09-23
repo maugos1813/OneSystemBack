@@ -3,6 +3,7 @@ import { buildApp } from "./api/app.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { db } from "./db/client.js";
+import { startAlertScheduler } from "./jobs/alertScheduler.js";
 import { publishPosition } from "./realtime/gateway.js";
 import { findOrCreateDeviceByImei, touchLastSeen } from "./services/device.service.js";
 import { getLatestPosition, storeAvlRecords } from "./services/position.service.js";
@@ -16,6 +17,8 @@ async function main() {
   const app = await buildApp();
   await app.listen({ host: env.HTTP_HOST, port: env.HTTP_PORT });
   logger.info({ host: env.HTTP_HOST, port: env.HTTP_PORT }, "HTTP API listening");
+
+  startAlertScheduler();
 
   await startTcpServer({
     onIdentify: async (imei) => {
