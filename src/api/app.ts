@@ -19,7 +19,10 @@ export async function buildApp() {
   const app = Fastify({ loggerInstance: logger });
 
   const corsOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim());
-  await app.register(cors, { origin: corsOrigins });
+  // Without an explicit `methods` list, @fastify/cors falls back to a default that
+  // excludes PATCH and DELETE — every edit/delete request from the browser (vehicles,
+  // API keys, settings, geofences) was failing CORS preflight in production.
+  await app.register(cors, { origin: corsOrigins, methods: ["GET", "POST", "PATCH", "DELETE"] });
 
   await app.register(jwt, { secret: env.JWT_SECRET });
 
