@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { authenticate, getCurrentUser, registerOrganizationWithOwner } from "../../services/auth.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
@@ -20,42 +21,73 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
-  app.post("/auth/register", async (request, reply) => {
-    const parsed = registerSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.flatten() });
-    }
-
-    try {
-      const { orgId, user } = await registerOrganizationWithOwner(parsed.data);
-      const token = app.jwt.sign({ userId: user.id, orgId, role: user.role });
-      return reply.code(201).send({ token });
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        return reply.code(409).send({ error: "Email already registered" });
+  app.post(
+    "/auth/register",
+    {
+      schema: {
+        tags: ["Auth"],
+        summary: "Crear una organización nueva con su primer usuario (owner)",
+        body: zodToJsonSchema(registerSchema),
+      },
+    },
+    async (request, reply) => {
+      const parsed = registerSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.flatten() });
       }
-      throw err;
-    }
-  });
 
-  app.post("/auth/login", async (request, reply) => {
-    const parsed = loginSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.flatten() });
-    }
+      try {
+        const { orgId, user } = await registerOrganizationWithOwner(parsed.data);
+        const token = app.jwt.sign({ userId: user.id, orgId, role: user.role });
+        return reply.code(201).send({ token });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          return reply.code(409).send({ error: "Email already registered" });
+        }
+        throw err;
+      }
+    },
+  );
 
-    const user = await authenticate(parsed.data.email, parsed.data.password);
-    if (!user) {
-      return reply.code(401).send({ error: "Invalid credentials" });
-    }
+  app.post(
+    "/auth/login",
+    {
+      schema: {
+        tags: ["Auth"],
+        summary: "Iniciar sesión y obtener un JWT",
+        body: zodToJsonSchema(loginSchema),
+      },
+    },
+    async (request, reply) => {
+      const parsed = loginSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.flatten() });
+      }
 
-    const token = app.jwt.sign({ userId: user.id, orgId: user.orgId, role: user.role });
-    return reply.send({ token });
-  });
+      const user = await authenticate(parsed.data.email, parsed.data.password);
+      if (!user) {
+        return reply.code(401).send({ error: "Invalid credentials" });
+      }
 
-  app.get("/me", { onRequest: requireAuth }, async (request, reply) => {
-    const me = await getCurrentUser(request.user.userId);
-    if (!me) return reply.code(404).send({ error: "User not found" });
-    return me;
-  });
+      const token = app.jwt.sign({ userId: user.id, orgId: user.orgId, role: user.role });
+      return reply.send({ token });
+    },
+  );
+
+  app.get(
+    "/me",
+    {
+      onRequest: requireAuth,
+      schema: {
+        tags: ["Auth"],
+        summary: "Datos del usuario y organización autenticados",
+        security: [{ bearerAuth: [] }],
+      },
+    },
+    async (request, reply) => {
+      const me = await getCurrentUser(request.user.userId);
+      if (!me) return reply.code(404).send({ error: "User not found" });
+      return me;
+    },
+  );
 }

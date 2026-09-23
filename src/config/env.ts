@@ -10,6 +10,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),
   // Comma-separated list of origins allowed to call the API from a browser (the frontend's URL(s)).
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
+  // Public base URL of this API, shown as the server in the OpenAPI docs (/docs).
+  PUBLIC_API_URL: z.string().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });
 

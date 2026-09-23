@@ -4,3 +4,4 @@ export * from "./devices.js";
 export * from "./vehicles.js";
 export * from "./positions.js";
 export * from "./deviceEvents.js";
+export * from "./apiKeys.js";

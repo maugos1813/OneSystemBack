@@ -15,6 +15,13 @@
       "when": 1790020271103,
       "tag": "0001_timescale_postgis",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790149435527,
+      "tag": "0002_abandoned_dormammu",
+      "breakpoints": true
     }
   ]
 }
