@@ -35,10 +35,10 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     key: "farmacy",
     name: "Gamonal Farmacy",
     type: "external",
-    // Es una app distinta de Gamonal Driver (confirmado). TODO: reemplazar por la
-    // URL real en cuanto se defina — sin SSO hasta que exista un backend propio
-    // con el endpoint /auth/sso.
-    url: "https://example.com/gamonal-farmacy",
+    // Mismo backend/frontend que Gamonal Driver (bgamonal19/gamonal-dryver---farmacia),
+    // solo que por el dominio original de Vercel en vez del alias falconext-logistica-web.
+    url: "https://gamonal-dryver-farmacia.vercel.app/login",
+    ssoEnabled: true,
   },
   {
     key: "nakamacar",
