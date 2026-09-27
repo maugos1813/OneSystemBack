@@ -35,11 +35,10 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     key: "farmacy",
     name: "Gamonal Farmacy",
     type: "external",
-    // Mismo backend/frontend que Gamonal Driver (bgamonal19/gamonal-dryver---farmacia):
-    // un solo login, el rol del usuario decide qué vista ve. Confirmar con el cliente
-    // si en algún momento separan la URL.
-    url: "https://falconext-logistica-web.vercel.app/login",
-    ssoEnabled: true,
+    // Es una app distinta de Gamonal Driver (confirmado). TODO: reemplazar por la
+    // URL real en cuanto se defina — sin SSO hasta que exista un backend propio
+    // con el endpoint /auth/sso.
+    url: "https://example.com/gamonal-farmacy",
   },
   {
     key: "nakamacar",
