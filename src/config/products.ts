@@ -45,5 +45,6 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     name: "NakamaCar",
     type: "external",
     url: "https://nakamacar.gamaagostinelli.cl/login",
+    ssoEnabled: true,
   },
 ];
