@@ -30,4 +30,10 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     // TODO: reemplazar por la URL real de Gamonal Farmacy cuando esté disponible.
     url: "https://example.com/gamonal-farmacy",
   },
+  {
+    key: "nakamacar",
+    name: "NakamaCar",
+    type: "external",
+    url: "https://nakamacar.gamaagostinelli.cl/login",
+  },
 ];
