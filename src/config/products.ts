@@ -8,6 +8,13 @@ export interface ProductCatalogEntry {
   path?: string;
   /** For "external" products: the URL of the separate platform (own login). */
   url?: string;
+  /**
+   * External products only: this platform's backend has a matching /auth/sso
+   * endpoint that exchanges a short-lived ticket (see sso.service.ts) for a
+   * real session, so the portal skips its login screen entirely instead of
+   * just opening its URL.
+   */
+  ssoEnabled?: boolean;
 }
 
 /**
@@ -22,13 +29,17 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     name: "Gamonal Driver",
     type: "external",
     url: "https://falconext-logistica-web.vercel.app/login",
+    ssoEnabled: true,
   },
   {
     key: "farmacy",
     name: "Gamonal Farmacy",
     type: "external",
-    // TODO: reemplazar por la URL real de Gamonal Farmacy cuando esté disponible.
-    url: "https://example.com/gamonal-farmacy",
+    // Mismo backend/frontend que Gamonal Driver (bgamonal19/gamonal-dryver---farmacia):
+    // un solo login, el rol del usuario decide qué vista ve. Confirmar con el cliente
+    // si en algún momento separan la URL.
+    url: "https://falconext-logistica-web.vercel.app/login",
+    ssoEnabled: true,
   },
   {
     key: "nakamacar",

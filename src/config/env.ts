@@ -18,6 +18,11 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   ALERT_EMAIL_FROM: z.string().default("OneSystec Alertas <onboarding@resend.dev>"),
   ALERT_EVAL_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
+  // Shared secret for signing short-lived SSO tickets handed to external products
+  // (e.g. Gamonal Driver/Farmacy) so a portal user doesn't have to log in twice.
+  // Must match the same env var on the receiving app. Left unset, SSO ticket
+  // minting fails with a clear error but everything else still works.
+  SSO_SHARED_SECRET: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

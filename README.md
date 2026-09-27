@@ -1,6 +1,6 @@
 # OneSystem Back
 
-Backend de ingesta y API para la plataforma de rastreo de flotas OneSystem. Recibe los
+Backend de ingesta y API para la plataforma de rastreo de flotas OneSystec. Recibe los
 datos que envía un dispositivo Teltonika **FMB204** (protocolo Codec 8 / Codec 8
 Extended sobre TCP), los decodifica, los guarda en PostgreSQL (TimescaleDB + PostGIS) y
 los expone vía una API REST + WebSocket multi-tenant.
