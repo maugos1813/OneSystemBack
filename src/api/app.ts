@@ -12,6 +12,7 @@ import { authRoutes } from "./routes/auth.routes.js";
 import { devicesRoutes } from "./routes/devices.routes.js";
 import { geofencesRoutes } from "./routes/geofences.routes.js";
 import { positionsRoutes } from "./routes/positions.routes.js";
+import { productsRoutes } from "./routes/products.routes.js";
 import { settingsRoutes } from "./routes/settings.routes.js";
 import { vehiclesRoutes } from "./routes/vehicles.routes.js";
 
@@ -30,9 +31,9 @@ export async function buildApp() {
     openapi: {
       openapi: "3.0.0",
       info: {
-        title: "OneSystem API",
+        title: "OneSystec API",
         description:
-          "API de la plataforma de rastreo de flotas OneSystem. Todos los datos quedan " +
+          "API de la plataforma de rastreo de flotas OneSystec. Todos los datos quedan " +
           "aislados por organización — un token (de login o una API key) solo puede ver " +
           "y modificar los dispositivos, vehículos y posiciones de su propia organización.",
         version: "1.0.0",
@@ -46,6 +47,7 @@ export async function buildApp() {
         { name: "Positions", description: "Posiciones e histórico de recorrido" },
         { name: "Settings", description: "Nombre de la organización, horario laboral y preferencias de alertas" },
         { name: "Geofences", description: "Geocercas circulares para alertas de entrada/salida" },
+        { name: "Products", description: "Catálogo de productos OneSystec habilitados por organización" },
       ],
       components: {
         securitySchemes: {
@@ -75,6 +77,7 @@ export async function buildApp() {
   await app.register(positionsRoutes);
   await app.register(settingsRoutes);
   await app.register(geofencesRoutes);
+  await app.register(productsRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

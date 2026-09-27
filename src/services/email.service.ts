@@ -30,7 +30,7 @@ function renderAlertEmailHtml(orgName: string, alerts: AlertEmailItem[]): string
     <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f6fb;padding:32px 16px;">
       <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,0.06);">
         <div style="background:linear-gradient(135deg,#38bdf8,#3b82f6,#7c3aed);padding:24px;">
-          <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;">OneSystem</p>
+          <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;">OneSystec</p>
           <p style="margin:4px 0 0;color:#e0e7ff;font-size:13px;">Alertas de tu flota — ${escapeHtml(orgName)}</p>
         </div>
         <table style="width:100%;border-collapse:collapse;">${rows}</table>

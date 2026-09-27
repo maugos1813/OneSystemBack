@@ -46,6 +46,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  logger.error({ err }, "fatal error starting OneSystem backend");
+  logger.error({ err }, "fatal error starting OneSystec backend");
   process.exit(1);
 });

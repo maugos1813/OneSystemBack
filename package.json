@@ -2,7 +2,7 @@
   "name": "onesystem-back",
   "version": "0.1.0",
   "private": true,
-  "description": "Backend de ingesta y API para la plataforma de rastreo de flotas OneSystem (Teltonika FMB204)",
+  "description": "Backend de ingesta y API para la plataforma de rastreo de flotas OneSystec (Teltonika FMB204)",
   "type": "module",
   "engines": {
     "node": ">=20"

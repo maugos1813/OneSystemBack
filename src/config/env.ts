@@ -16,7 +16,7 @@ const envSchema = z.object({
   // Email alerts (Resend). Left unset, the alert scheduler still runs (so idling/geofence
   // state keeps ticking) but silently skips sending — fine for local dev.
   RESEND_API_KEY: z.string().optional(),
-  ALERT_EMAIL_FROM: z.string().default("OneSystem Alertas <onboarding@resend.dev>"),
+  ALERT_EMAIL_FROM: z.string().default("OneSystec Alertas <onboarding@resend.dev>"),
   ALERT_EVAL_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
 });
 
