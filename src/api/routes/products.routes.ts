@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getCurrentUser } from "../../services/auth.service.js";
-import { getProductsForOrg } from "../../services/product.service.js";
+import { getProductsForUser } from "../../services/product.service.js";
 import { createSsoTicket } from "../../services/sso.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
@@ -13,7 +13,7 @@ export async function productsRoutes(app: FastifyInstance): Promise<void> {
     "/products",
     { schema: { tags: ["Products"], summary: "Listar los productos habilitados para la organización", security: AUTH } },
     async (request) => {
-      return getProductsForOrg(request.user.orgId);
+      return getProductsForUser(request.user.orgId, request.user.userId, request.user.role);
     },
   );
 
@@ -28,7 +28,7 @@ export async function productsRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { key } = request.params as { key: string };
-      const products = await getProductsForOrg(request.user.orgId);
+      const products = await getProductsForUser(request.user.orgId, request.user.userId, request.user.role);
       const product = products.find((p) => p.key === key);
 
       if (!product || product.type !== "external" || !product.url) {

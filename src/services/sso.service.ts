@@ -14,7 +14,7 @@ export function createSsoTicket(params: { email: string; productKey: string }): 
   if (!env.SSO_SHARED_SECRET) {
     throw new Error("SSO_SHARED_SECRET is not configured");
   }
-  return jwt.sign({ email: params.email, aud: params.productKey }, env.SSO_SHARED_SECRET, {
+  return jwt.sign({ email: params.email, product: params.productKey }, env.SSO_SHARED_SECRET, {
     algorithm: "HS256",
     expiresIn: TICKET_TTL_SECONDS,
   });
