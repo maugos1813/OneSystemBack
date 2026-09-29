@@ -3,6 +3,7 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ApiKey } from "../../db/schema/index.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../services/apiKey.service.js";
+import { requireRole } from "../middlewares/auth.middleware.js";
 
 const createSchema = z.object({ name: z.string().min(2).max(100) });
 
@@ -35,9 +36,10 @@ export async function apiKeysRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/api-keys",
     {
+      preHandler: requireRole("owner", "admin"),
       schema: {
         tags: ["API Keys"],
-        summary: "Listar las API keys de tu organización",
+        summary: "Listar las API keys de tu organización (owner/admin)",
         security: [{ bearerAuth: [] }],
       },
     },
@@ -50,9 +52,13 @@ export async function apiKeysRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/api-keys",
     {
+      // An API key authenticates as full owner-level access (see apiKey.service.ts),
+      // ignoring role and área restrictions entirely — a restricted viewer/manager
+      // minting one for itself would be a direct privilege-escalation path.
+      preHandler: requireRole("owner", "admin"),
       schema: {
         tags: ["API Keys"],
-        summary: "Crear una API key nueva (el valor completo solo se muestra esta vez)",
+        summary: "Crear una API key nueva (el valor completo solo se muestra esta vez) (owner/admin)",
         security: [{ bearerAuth: [] }],
         body: zodToJsonSchema(createSchema),
       },
@@ -70,9 +76,10 @@ export async function apiKeysRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     "/api-keys/:id",
     {
+      preHandler: requireRole("owner", "admin"),
       schema: {
         tags: ["API Keys"],
-        summary: "Revocar una API key",
+        summary: "Revocar una API key (owner/admin)",
         security: [{ bearerAuth: [] }],
       },
     },

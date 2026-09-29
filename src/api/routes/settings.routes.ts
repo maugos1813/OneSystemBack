@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { requireAuth } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 import { getSettings, updateSettings } from "../../services/settings.service.js";
 
 const workingHoursDaySchema = z.object({
@@ -67,9 +67,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   app.patch(
     "/settings",
     {
+      preHandler: requireRole("owner", "admin"),
       schema: {
         tags: ["Settings"],
-        summary: "Editar nombre, horario laboral y/o preferencias de alertas (parcial)",
+        summary: "Editar nombre, horario laboral y/o preferencias de alertas (parcial) (owner/admin)",
         security: AUTH,
         body: zodToJsonSchema(updateSchema),
       },

@@ -7,7 +7,7 @@ import {
   listGeofencesForOrg,
   updateGeofence,
 } from "../../services/geofence.service.js";
-import { requireAuth } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -21,6 +21,7 @@ const createSchema = z.object({
 const updateSchema = createSchema.partial();
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const MANAGE_GEOFENCES = requireRole("owner", "admin");
 
 export async function geofencesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
@@ -36,9 +37,10 @@ export async function geofencesRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/geofences",
     {
+      preHandler: MANAGE_GEOFENCES,
       schema: {
         tags: ["Geofences"],
-        summary: "Crear una geocerca circular (centro + radio)",
+        summary: "Crear una geocerca circular (centro + radio) (owner/admin)",
         security: AUTH,
         body: zodToJsonSchema(createSchema),
       },
@@ -55,9 +57,10 @@ export async function geofencesRoutes(app: FastifyInstance): Promise<void> {
   app.patch(
     "/geofences/:id",
     {
+      preHandler: MANAGE_GEOFENCES,
       schema: {
         tags: ["Geofences"],
-        summary: "Editar una geocerca",
+        summary: "Editar una geocerca (owner/admin)",
         security: AUTH,
         body: zodToJsonSchema(updateSchema),
       },
@@ -75,7 +78,10 @@ export async function geofencesRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete(
     "/geofences/:id",
-    { schema: { tags: ["Geofences"], summary: "Eliminar una geocerca", security: AUTH } },
+    {
+      preHandler: MANAGE_GEOFENCES,
+      schema: { tags: ["Geofences"], summary: "Eliminar una geocerca (owner/admin)", security: AUTH },
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const deleted = await deleteGeofence(request.user.orgId, id);
