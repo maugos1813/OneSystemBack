@@ -71,6 +71,43 @@ export async function createTeamMember(input: CreateTeamMemberInput): Promise<Te
   });
 }
 
+export async function getTeamMember(orgId: string, userId: string): Promise<User | undefined> {
+  const [member] = await db
+    .select()
+    .from(users)
+    .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
+    .limit(1);
+  return member;
+}
+
+export async function updateTeamMemberEmail(
+  orgId: string,
+  userId: string,
+  email: string,
+): Promise<User | undefined> {
+  const [updated] = await db
+    .update(users)
+    .set({ email })
+    .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
+    .returning();
+  return updated;
+}
+
+export async function updateTeamMemberPassword(orgId: string, userId: string, password: string): Promise<boolean> {
+  const passwordHash = await hashPassword(password);
+  const [updated] = await db
+    .update(users)
+    .set({ passwordHash })
+    .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
+    .returning({ id: users.id });
+  return !!updated;
+}
+
+export async function deleteTeamMember(orgId: string, userId: string): Promise<boolean> {
+  const result = await db.delete(users).where(and(eq(users.id, userId), eq(users.orgId, orgId)));
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function updateTeamMemberRole(
   orgId: string,
   userId: string,
