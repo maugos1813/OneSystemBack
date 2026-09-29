@@ -14,6 +14,10 @@ const createSchema = z.object({
   name: z.string().min(1).max(100),
   plate: z.string().max(20).optional(),
   deviceId: z.string().uuid().optional(),
+  // Client-contract tag (e.g. "DHL", "UNIVEX") — freely assignable by the org, used to
+  // filter the map view. Radius Velocity seeds it on first sync but never overwrites it
+  // again, so a manual change here always sticks.
+  fleetGroup: z.string().max(50).nullable().optional(),
 });
 
 const updateSchema = createSchema.partial();
@@ -66,7 +70,7 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
     {
       schema: {
         tags: ["Vehicles"],
-        summary: "Editar un vehículo (nombre, patente, dispositivo asignado)",
+        summary: "Editar un vehículo (nombre, patente, dispositivo asignado, área)",
         security: AUTH,
         body: zodToJsonSchema(updateSchema),
       },

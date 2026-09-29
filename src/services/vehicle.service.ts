@@ -23,7 +23,7 @@ export async function createVehicle(input: NewVehicle): Promise<Vehicle> {
 export async function updateVehicle(
   orgId: string,
   vehicleId: string,
-  patch: Partial<Pick<NewVehicle, "name" | "plate" | "deviceId">>,
+  patch: Partial<Pick<NewVehicle, "name" | "plate" | "deviceId" | "fleetGroup">>,
 ): Promise<Vehicle | undefined> {
   const [row] = await db
     .update(vehicles)

@@ -106,11 +106,14 @@ async function syncVehicle(orgId: string, deviceId: string, plate: string, fleet
     .limit(1);
 
   if (!existing) {
+    // fleetGroup is only seeded here, from Radius Velocity's own device group, as a
+    // sensible starting value — once the vehicle exists, the org can freely reassign it
+    // (e.g. via PATCH /vehicles/:id) and this sync never overwrites that choice again.
     await db.insert(vehicles).values({ orgId, name: plate, plate, fleetGroup, deviceId });
     return;
   }
-  if (existing.plate !== plate || existing.fleetGroup !== fleetGroup) {
-    await db.update(vehicles).set({ plate, fleetGroup }).where(eq(vehicles.id, existing.id));
+  if (existing.plate !== plate) {
+    await db.update(vehicles).set({ plate }).where(eq(vehicles.id, existing.id));
   }
 }
 
