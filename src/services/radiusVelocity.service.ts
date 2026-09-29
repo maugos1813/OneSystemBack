@@ -70,12 +70,12 @@ async function getAccessToken(): Promise<string> {
 async function fetchLivePositions(): Promise<RvDeviceGroup[]> {
   const url = `${POSITIONS_URL}?customer=${env.RADIUS_VELOCITY_CUSTOMER_ID}`;
   let token = await getAccessToken();
-  let res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  let res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
 
   if (res.status === 401) {
     // Our TTL guess may be optimistic — force one refresh and retry before giving up.
     token = await refreshAccessToken();
-    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    res = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
   }
 
   if (!res.ok) throw new Error(`Radius Velocity positions fetch failed: HTTP ${res.status}`);
