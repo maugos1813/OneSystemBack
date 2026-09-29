@@ -23,6 +23,13 @@ const envSchema = z.object({
   // Must match the same env var on the receiving app. Left unset, SSO ticket
   // minting fails with a clear error but everything else still works.
   SSO_SHARED_SECRET: z.string().optional(),
+  // Radius Velocity (third-party telematics) integration. Left unset, the scheduler
+  // still starts but silently skips syncing — same graceful-no-op pattern as RESEND_API_KEY.
+  RADIUS_VELOCITY_REFRESH_TOKEN: z.string().optional(),
+  RADIUS_VELOCITY_CUSTOMER_ID: z.string().default("22716414390001"),
+  // Which org synced vehicles belong to (GamonalTrasporti). Required alongside
+  // RADIUS_VELOCITY_REFRESH_TOKEN for the sync to actually run.
+  RADIUS_VELOCITY_ORG_ID: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

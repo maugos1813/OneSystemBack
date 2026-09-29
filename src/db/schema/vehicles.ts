@@ -10,6 +10,9 @@ export const vehicles = pgTable("vehicles", {
     .references(() => organizations.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 100 }).notNull(),
   plate: varchar("plate", { length: 20 }),
+  // Which client contract this vehicle belongs to (e.g. "DHL", "UNIVEX") — only set for
+  // vehicles synced from Radius Velocity, which groups devices this way.
+  fleetGroup: varchar("fleet_group", { length: 50 }),
   deviceId: uuid("device_id").references(() => devices.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

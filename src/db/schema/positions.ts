@@ -33,7 +33,9 @@ export const positions = pgTable(
     lng: doublePrecision("lng").notNull(),
     altitude: integer("altitude").notNull(),
     angle: integer("angle").notNull(),
-    satellites: smallint("satellites").notNull(),
+    // Nullable: third-party sources like Radius Velocity don't report a satellite
+    // count at all — null means "not reported", not "zero satellites".
+    satellites: smallint("satellites"),
     speed: integer("speed").notNull(),
     priority: smallint("priority").notNull(),
     /** Raw decoded IO elements keyed by AVL ID, e.g. { "239": 1, "66": 24079 }. */
