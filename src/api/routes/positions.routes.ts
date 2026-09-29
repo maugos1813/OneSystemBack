@@ -45,7 +45,7 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const vehicle = await getVehicleForOrg(request.user.orgId, id);
+      const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
       if (!vehicle.deviceId) return reply.code(404).send({ error: "Vehicle has no device assigned" });
 
@@ -70,7 +70,7 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
       const parsed = historyQuerySchema.safeParse(request.query);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-      const vehicle = await getVehicleForOrg(request.user.orgId, id);
+      const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
       if (!vehicle.deviceId) return reply.code(404).send({ error: "Vehicle has no device assigned" });
 
@@ -93,7 +93,7 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
       const parsed = eventsQuerySchema.safeParse(request.query);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-      const vehicle = await getVehicleForOrg(request.user.orgId, id);
+      const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
       if (!vehicle.deviceId) return reply.code(404).send({ error: "Vehicle has no device assigned" });
 

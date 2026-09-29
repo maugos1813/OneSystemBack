@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { claimDevice, listDevicesForOrg } from "../../services/device.service.js";
-import { requireAuth } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const claimSchema = z.object({ imei: z.string().min(10).max(20) });
 
@@ -21,13 +21,14 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request) => {
-      return listDevicesForOrg(request.user.orgId);
+      return listDevicesForOrg(request.user.orgId, request.user.allowedArea);
     },
   );
 
   app.post(
     "/devices/claim",
     {
+      preHandler: requireRole("owner", "admin"),
       schema: {
         tags: ["Devices"],
         summary: "Vincular un dispositivo sin reclamar (por IMEI) a tu organización",

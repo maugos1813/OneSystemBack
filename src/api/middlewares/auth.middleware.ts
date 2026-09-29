@@ -28,7 +28,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   }
 }
 
-export function requireRole(...roles: Array<"owner" | "admin" | "viewer">) {
+export function requireRole(...roles: Array<"owner" | "admin" | "manager" | "viewer">) {
   return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
     if (!roles.includes(request.user.role)) {
       await reply.code(403).send({ error: "Forbidden" });

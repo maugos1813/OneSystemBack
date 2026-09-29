@@ -1,6 +1,6 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { devices, type Device } from "../db/schema/index.js";
+import { devices, vehicles, type Device } from "../db/schema/index.js";
 
 /** Looks up a device by IMEI, auto-creating an "unclaimed" row on first contact. */
 export async function findOrCreateDeviceByImei(imei: string): Promise<Device> {
@@ -26,8 +26,24 @@ export async function claimDevice(orgId: string, imei: string): Promise<Device |
   return updated;
 }
 
-export async function listDevicesForOrg(orgId: string): Promise<Device[]> {
-  return db.select().from(devices).where(eq(devices.orgId, orgId));
+/** `allowedArea` excludes devices outside that área entirely — including any device
+ * with no vehicle assigned at all, since there's nothing to attribute it to. */
+export async function listDevicesForOrg(orgId: string, allowedArea?: string | null): Promise<Device[]> {
+  if (!allowedArea) {
+    return db.select().from(devices).where(eq(devices.orgId, orgId));
+  }
+
+  const allowedDeviceIds = await db
+    .select({ deviceId: vehicles.deviceId })
+    .from(vehicles)
+    .where(and(eq(vehicles.orgId, orgId), eq(vehicles.fleetGroup, allowedArea)));
+  const deviceIds = allowedDeviceIds.map((v) => v.deviceId).filter((id): id is string => id !== null);
+  if (deviceIds.length === 0) return [];
+
+  return db
+    .select()
+    .from(devices)
+    .where(and(eq(devices.orgId, orgId), inArray(devices.id, deviceIds)));
 }
 
 export async function getDeviceById(deviceId: string): Promise<Device | undefined> {

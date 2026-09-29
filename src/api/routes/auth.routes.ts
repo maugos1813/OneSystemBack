@@ -38,7 +38,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const { orgId, user } = await registerOrganizationWithOwner(parsed.data);
-        const token = app.jwt.sign({ userId: user.id, orgId, role: user.role });
+        const token = app.jwt.sign({ userId: user.id, orgId, role: user.role, allowedArea: user.allowedArea });
         return reply.code(201).send({ token });
       } catch (err) {
         if (isUniqueViolation(err)) {
@@ -69,7 +69,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      const token = app.jwt.sign({ userId: user.id, orgId: user.orgId, role: user.role });
+      const token = app.jwt.sign({
+        userId: user.id,
+        orgId: user.orgId,
+        role: user.role,
+        allowedArea: user.allowedArea,
+      });
       return reply.send({ token });
     },
   );

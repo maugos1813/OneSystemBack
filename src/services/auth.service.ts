@@ -5,8 +5,10 @@ import { organizations, users, type User } from "../db/schema/index.js";
 
 export interface CurrentUser {
   userId: string;
+  name: string;
   email: string;
   role: User["role"];
+  allowedArea: string | null;
   orgId: string;
   orgName: string;
 }
@@ -15,8 +17,10 @@ export async function getCurrentUser(userId: string): Promise<CurrentUser | unde
   const [row] = await db
     .select({
       userId: users.id,
+      name: users.name,
       email: users.email,
       role: users.role,
+      allowedArea: users.allowedArea,
       orgId: organizations.id,
       orgName: organizations.name,
     })

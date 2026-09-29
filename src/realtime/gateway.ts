@@ -1,7 +1,10 @@
 import websocketPlugin from "@fastify/websocket";
+import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { EventEmitter } from "node:events";
+import { db } from "../db/client.js";
 import type { Position } from "../db/schema/index.js";
+import { vehicles } from "../db/schema/index.js";
 
 /**
  * Simple in-process pub/sub keyed by orgId. Good enough for a single API instance;
@@ -29,16 +32,30 @@ export async function registerRealtimeGateway(app: FastifyInstance): Promise<voi
     // requireAuth middleware the REST routes use.
     const { token } = request.query as { token?: string };
     let orgId: string;
+    let allowedArea: string | null | undefined;
     try {
       if (!token) throw new Error("missing token");
-      const payload = app.jwt.verify<{ orgId: string }>(token);
+      const payload = app.jwt.verify<{ orgId: string; allowedArea?: string | null }>(token);
       orgId = payload.orgId;
+      allowedArea = payload.allowedArea;
     } catch {
       socket.close(4001, "Unauthorized");
       return;
     }
 
-    const onPosition = (event: { deviceId: string; position: Position }) => {
+    const onPosition = async (event: { deviceId: string; position: Position }) => {
+      // A hard área restriction must hold here too — this channel bypasses the REST
+      // layer entirely, so without this check a restricted user would still see every
+      // other área's positions pushed straight at them regardless of what /vehicles
+      // returns.
+      if (allowedArea) {
+        const [vehicle] = await db
+          .select({ fleetGroup: vehicles.fleetGroup })
+          .from(vehicles)
+          .where(eq(vehicles.deviceId, event.deviceId))
+          .limit(1);
+        if (vehicle?.fleetGroup !== allowedArea) return;
+      }
       socket.send(JSON.stringify({ type: "position", ...event }));
     };
     positionEvents.on(orgId, onPosition);

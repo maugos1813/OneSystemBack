@@ -8,7 +8,7 @@ import {
   listVehiclesForOrg,
   updateVehicle,
 } from "../../services/vehicle.service.js";
-import { requireAuth } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -23,6 +23,10 @@ const createSchema = z.object({
 const updateSchema = createSchema.partial();
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+// Mutating a vehicle (including reassigning its área) is left to owner/admin only — a
+// manager/viewer restricted to one área could otherwise edit a vehicle's fleetGroup to
+// pull it into their own área, or edit one outside their área if they guessed its id.
+const MANAGE_VEHICLES = requireRole("owner", "admin");
 
 export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
@@ -31,7 +35,7 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
     "/vehicles",
     { schema: { tags: ["Vehicles"], summary: "Listar vehículos", security: AUTH } },
     async (request) => {
-      return listVehiclesForOrg(request.user.orgId);
+      return listVehiclesForOrg(request.user.orgId, request.user.allowedArea);
     },
   );
 
@@ -40,7 +44,7 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
     { schema: { tags: ["Vehicles"], summary: "Obtener un vehículo", security: AUTH } },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const vehicle = await getVehicleForOrg(request.user.orgId, id);
+      const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
       return vehicle;
     },
@@ -49,9 +53,10 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/vehicles",
     {
+      preHandler: MANAGE_VEHICLES,
       schema: {
         tags: ["Vehicles"],
-        summary: "Crear un vehículo",
+        summary: "Crear un vehículo (owner/admin)",
         security: AUTH,
         body: zodToJsonSchema(createSchema),
       },
@@ -68,9 +73,10 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
   app.patch(
     "/vehicles/:id",
     {
+      preHandler: MANAGE_VEHICLES,
       schema: {
         tags: ["Vehicles"],
-        summary: "Editar un vehículo (nombre, patente, dispositivo asignado, área)",
+        summary: "Editar un vehículo (nombre, patente, dispositivo asignado, área) (owner/admin)",
         security: AUTH,
         body: zodToJsonSchema(updateSchema),
       },
@@ -88,7 +94,10 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete(
     "/vehicles/:id",
-    { schema: { tags: ["Vehicles"], summary: "Eliminar un vehículo", security: AUTH } },
+    {
+      preHandler: MANAGE_VEHICLES,
+      schema: { tags: ["Vehicles"], summary: "Eliminar un vehículo (owner/admin)", security: AUTH },
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const deleted = await deleteVehicle(request.user.orgId, id);

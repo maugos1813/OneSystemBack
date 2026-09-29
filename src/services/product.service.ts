@@ -16,13 +16,14 @@ export async function getProductsForOrg(orgId: string): Promise<ProductCatalogEn
 
 /**
  * What this specific user should see: the org's ceiling, further narrowed for a
- * "viewer" by whichever products an admin has granted them (user_products). An
- * "owner"/"admin" always sees the full org ceiling — restricting teammates is
- * their job to do to others, not something applied to themselves.
+ * "viewer"/"manager" by whichever products an admin (or, for a manager's own
+ * sub-users, the manager) has granted them (user_products). An "owner"/"admin" always
+ * sees the full org ceiling — restricting teammates is their job to do to others, not
+ * something applied to themselves.
  */
 export async function getProductsForUser(orgId: string, userId: string, role: User["role"]): Promise<ProductCatalogEntry[]> {
   const orgProducts = await getProductsForOrg(orgId);
-  if (role !== "viewer") return orgProducts;
+  if (role !== "viewer" && role !== "manager") return orgProducts;
 
   const rows = await db
     .select({ productKey: userProducts.productKey })
