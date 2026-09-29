@@ -1,18 +1,33 @@
 import { relations } from "drizzle-orm";
-import { boolean, doublePrecision, integer, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, doublePrecision, integer, jsonb, pgEnum, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.js";
 
-/** Circular geofence: center + radius, the simplest shape that covers the common case
- * (a depot, a client site, an authorized work zone) without a polygon-drawing tool. */
+export const geofenceTypeEnum = pgEnum("geofence_type", ["circle", "polygon"]);
+
+/** A geofence point, as stored in `path`. */
+export interface GeofencePoint {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Two shapes: a circle (center + radius — the common case, e.g. a depot or client site,
+ * with no polygon-drawing tool needed) or a polygon (a list of rings, so a single
+ * geofence can also cover several disjoint areas — e.g. official zone boundaries like
+ * Milan's Area B/Area C, which aren't circular). Exactly one of
+ * (lat/lng/radiusMeters) or path is populated, matching `type`.
+ */
 export const geofences = pgTable("geofences", {
   id: uuid("id").defaultRandom().primaryKey(),
   orgId: uuid("org_id")
     .notNull()
     .references(() => organizations.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 100 }).notNull(),
-  lat: doublePrecision("lat").notNull(),
-  lng: doublePrecision("lng").notNull(),
-  radiusMeters: integer("radius_meters").notNull(),
+  type: geofenceTypeEnum("type").notNull().default("circle"),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+  radiusMeters: integer("radius_meters"),
+  path: jsonb("path").$type<GeofencePoint[][]>(),
   alertOnEnter: boolean("alert_on_enter").notNull().default(true),
   alertOnExit: boolean("alert_on_exit").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
-import { organizations, users, type Device, type Position, type Vehicle } from "../db/schema/index.js";
+import { organizations, users, type Device, type Geofence, type Position, type Vehicle } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { listGeofencesForOrg } from "./geofence.service.js";
 import { listDevicesForOrg } from "./device.service.js";
@@ -10,8 +10,6 @@ import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
 import { getOpenNotification, openNotification, resolveNotification } from "./alertNotification.service.js";
 import { type AlertPreferences, type OrgSettings, type WorkingHours, withDefaults } from "./settings.service.js";
 import { listVehiclesForOrg } from "./vehicle.service.js";
-
-const GEOFENCE_MAX_KM = 1000; // sanity bound, geofence radii are always far smaller
 
 /** `positions.io_data` is stored as jsonb, which Drizzle infers as `unknown` — this is
  * the same shape the frontend's serializeIoElements() produces (string AVL-id keys). */
@@ -70,6 +68,36 @@ function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: num
   const lat2 = (b.lat * Math.PI) / 180;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/** Even-odd (ray-casting) point-in-ring test — lng as x, lat as y. */
+function pointInRing(point: { lat: number; lng: number }, ring: { lat: number; lng: number }[]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i]!.lng;
+    const yi = ring[i]!.lat;
+    const xj = ring[j]!.lng;
+    const yj = ring[j]!.lat;
+    const intersect = yi > point.lat !== yj > point.lat && point.lng < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/**
+ * Handles both shapes. For a polygon, XORing the even-odd result across every ring
+ * correctly covers both a hole (an oppositely-wound nested ring) and disjoint separate
+ * areas (like Area B's few exclaves) with the same rule.
+ */
+function isInsideGeofence(position: { lat: number; lng: number }, gf: Geofence): boolean {
+  if (gf.type === "polygon") {
+    if (!gf.path) return false;
+    let inside = false;
+    for (const ring of gf.path) if (pointInRing(position, ring)) inside = !inside;
+    return inside;
+  }
+  if (gf.lat == null || gf.lng == null || gf.radiusMeters == null) return false;
+  return haversineKm(position, { lat: gf.lat, lng: gf.lng }) * 1000 <= gf.radiusMeters;
 }
 
 function hasAnyAlertEnabled(alerts: AlertPreferences): boolean {
@@ -211,9 +239,7 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
     if (settings.alerts.geofenceEnabled && position) {
       for (const gf of geofences) {
         const key = `${vehicle.id}:${gf.id}`;
-        const distanceKm = haversineKm(position, gf);
-        if (distanceKm > GEOFENCE_MAX_KM) continue;
-        const inside = distanceKm * 1000 <= gf.radiusMeters;
+        const inside = isInsideGeofence(position, gf);
         const seenBefore = insideGeofence.has(key);
         const wasInside = insideGeofence.get(key);
         insideGeofence.set(key, inside);
