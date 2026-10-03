@@ -9,3 +9,4 @@ export * from "./geofences.js";
 export * from "./alertNotifications.js";
 export * from "./organizationProducts.js";
 export * from "./userProducts.js";
+export * from "./tolls.js";

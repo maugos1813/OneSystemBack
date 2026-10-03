@@ -4,6 +4,7 @@ import { deviceEvents, positions, type DeviceEvent, type Position } from "../db/
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { serializeIoElements } from "../tcp-server/codec8/ioSerialize.js";
 import type { AvlRecord } from "../tcp-server/codec8/types.js";
+import { detectTollPassages } from "./tollDetection.service.js";
 
 const EVENT_AVL_IDS: ReadonlySet<number> = new Set([AVL_ID.IGNITION, AVL_ID.MOVEMENT]);
 
@@ -44,6 +45,12 @@ export async function storeAvlRecords(deviceId: string, records: AvlRecord[]): P
       await tx.insert(deviceEvents).values(eventRows);
     }
   });
+
+  // Not awaited: the device's ack must not wait on toll detection (which never throws).
+  void detectTollPassages(
+    deviceId,
+    records.map((record) => ({ lat: record.gps.latitude, lng: record.gps.longitude, ts: record.timestamp })),
+  );
 }
 
 function eventTypeFromAvlId(avlId: number): string {

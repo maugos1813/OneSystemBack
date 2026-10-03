@@ -1,0 +1,1 @@
+ALTER TABLE "toll_plazas" ADD COLUMN "points" jsonb DEFAULT '[]'::jsonb NOT NULL;

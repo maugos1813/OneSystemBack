@@ -15,6 +15,7 @@ import { positionsRoutes } from "./routes/positions.routes.js";
 import { productsRoutes } from "./routes/products.routes.js";
 import { settingsRoutes } from "./routes/settings.routes.js";
 import { teamUsersRoutes } from "./routes/teamUsers.routes.js";
+import { tollsRoutes } from "./routes/tolls.routes.js";
 import { vehiclesRoutes } from "./routes/vehicles.routes.js";
 
 export async function buildApp() {
@@ -50,6 +51,7 @@ export async function buildApp() {
         { name: "Geofences", description: "Geocercas circulares para alertas de entrada/salida" },
         { name: "Products", description: "Catálogo de productos OneSystec habilitados por organización" },
         { name: "Team", description: "Miembros de la organización: roles y qué cards puede ver cada uno" },
+        { name: "Tolls", description: "Pasos de los vehículos por peajes, detectados a partir de su recorrido" },
       ],
       components: {
         securitySchemes: {
@@ -81,6 +83,7 @@ export async function buildApp() {
   await app.register(geofencesRoutes);
   await app.register(productsRoutes);
   await app.register(teamUsersRoutes);
+  await app.register(tollsRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

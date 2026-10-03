@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "seed:tolls": "tsx scripts/seedTollPlazas.ts",
     "simulate:device": "tsx test/tools/simulate-device.ts"
   },
   "dependencies": {
