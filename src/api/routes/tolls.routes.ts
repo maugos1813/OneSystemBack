@@ -1,17 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { listTollPassages, setTollPassageFlagged } from "../../services/toll.service.js";
+import { listTollMonths, listTollPassages, setTollPassageFlagged } from "../../services/toll.service.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
 
-const listQuerySchema = z.object({
+const filterFields = {
   vehicleId: z.string().uuid().optional(),
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
+  fleetGroup: z.string().max(50).optional(),
   flaggedOnly: z
     .enum(["true", "false"])
     .transform((v) => v === "true")
+    .optional(),
+};
+
+const monthsQuerySchema = z.object(filterFields);
+
+const listQuerySchema = z.object({
+  ...filterFields,
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  month: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
     .optional(),
   limit: z.coerce.number().int().positive().max(500).optional(),
   offset: z.coerce.number().int().min(0).optional(),
@@ -28,16 +39,43 @@ export async function tollsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
 
   app.get(
-    "/tolls/passages",
+    "/tolls/months",
     {
       schema: {
         tags: ["Tolls"],
-        summary: "Pasos por peaje detectados (últimos 7 días por defecto)",
+        summary: "Totales de pasos por peaje agrupados por mes (sin cargar los pasos)",
         security: AUTH,
         querystring: {
           type: "object",
           properties: {
             vehicleId: { type: "string", format: "uuid" },
+            fleetGroup: { type: "string" },
+            flaggedOnly: { type: "string", enum: ["true", "false"] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const parsed = monthsQuerySchema.safeParse(request.query);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      return listTollMonths({ ...parsed.data, orgId: request.user.orgId, allowedArea: request.user.allowedArea });
+    },
+  );
+
+  app.get(
+    "/tolls/passages",
+    {
+      schema: {
+        tags: ["Tolls"],
+        summary: "Pasos por peaje detectados, por mes (month=YYYY-MM) o rango (últimos 7 días por defecto)",
+        security: AUTH,
+        querystring: {
+          type: "object",
+          properties: {
+            vehicleId: { type: "string", format: "uuid" },
+            fleetGroup: { type: "string" },
+            month: { type: "string", pattern: "^\\d{4}-(0[1-9]|1[0-2])$" },
             from: { type: "string", format: "date-time" },
             to: { type: "string", format: "date-time" },
             flaggedOnly: { type: "string", enum: ["true", "false"] },
@@ -55,7 +93,7 @@ export async function tollsRoutes(app: FastifyInstance): Promise<void> {
         ...parsed.data,
         orgId: request.user.orgId,
         allowedArea: request.user.allowedArea,
-        from: parsed.data.from ?? new Date(Date.now() - DEFAULT_RANGE_MS),
+        from: parsed.data.from ?? (parsed.data.month ? undefined : new Date(Date.now() - DEFAULT_RANGE_MS)),
       });
     },
   );
