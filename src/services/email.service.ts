@@ -4,9 +4,11 @@ import { logger } from "../config/logger.js";
 
 const resend = env.RESEND_API_KEY ? new Resend(env.RESEND_API_KEY) : null;
 
-/** The frontend's own origin, for a "ver en la app" link — reuses CORS_ORIGIN since in
- * production that's already set to the deployed frontend's URL(s). */
-const APP_URL = env.CORS_ORIGIN.split(",")[0]!.trim();
+/** The frontend's own origin, for the "ver en la app" link and the logo — reuses
+ * CORS_ORIGIN, which in production lists localhost dev origins before the deployed one,
+ * so a non-local origin is preferred when there is one. */
+const CORS_ORIGINS = env.CORS_ORIGIN.split(",").map((origin) => origin.trim());
+const APP_URL = CORS_ORIGINS.find((origin) => !/localhost|127\.0\.0\.1/.test(origin)) ?? CORS_ORIGINS[0]!;
 
 export interface AlertEmailItem {
   vehicleName: string;
@@ -30,8 +32,15 @@ function renderAlertEmailHtml(orgName: string, alerts: AlertEmailItem[]): string
     <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f6fb;padding:32px 16px;">
       <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,0.06);">
         <div style="background:linear-gradient(135deg,#38bdf8,#3b82f6,#7c3aed);padding:24px;">
-          <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;">OneSystec</p>
-          <p style="margin:4px 0 0;color:#e0e7ff;font-size:13px;">Alertas de tu flota — ${escapeHtml(orgName)}</p>
+          <table style="border-collapse:collapse;"><tr>
+            <td style="padding:0 12px 0 0;vertical-align:middle;">
+              <img src="${APP_URL}/logos/onetrack-icon.png" width="40" height="40" alt="" style="display:block;border-radius:10px;" />
+            </td>
+            <td style="vertical-align:middle;">
+              <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;">OneTrack</p>
+              <p style="margin:2px 0 0;color:#e0e7ff;font-size:13px;">Alertas de tu flota — ${escapeHtml(orgName)}</p>
+            </td>
+          </tr></table>
         </div>
         <table style="width:100%;border-collapse:collapse;">${rows}</table>
         <div style="padding:20px 16px;">
