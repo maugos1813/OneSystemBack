@@ -23,7 +23,8 @@ export interface ProductCatalogEntry {
  * A handful of entries that barely change — not worth a DB-backed admin UI yet.
  */
 export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
-  { key: "gps", name: "GPS", type: "internal", path: "/gps" },
+  // The key stays "gps": it's what organization_products / user_products rows reference.
+  { key: "gps", name: "OneTrack", type: "internal", path: "/gps" },
   {
     key: "driver",
     name: "Gamonal Driver",
