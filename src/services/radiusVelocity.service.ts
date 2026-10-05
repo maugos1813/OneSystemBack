@@ -161,7 +161,7 @@ async function syncDevicePosition(orgId: string, deviceId: string, rv: RvDevice)
 
   await db.update(devices).set({ lastSeenAt: ts }).where(eq(devices.id, deviceId));
 
-  void detectTollPassages(deviceId, [{ lat: rv.lat, lng: rv.lon, ts }]);
+  void detectTollPassages(deviceId, [{ lat: rv.lat, lng: rv.lon, ts, speed: Math.round(toKmh(rv.speed, rv.speed_measure_text)) }]);
 
   if (inserted) publishPosition(orgId, deviceId, inserted);
 }

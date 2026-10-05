@@ -49,7 +49,12 @@ export async function storeAvlRecords(deviceId: string, records: AvlRecord[]): P
   // Not awaited: the device's ack must not wait on toll detection (which never throws).
   void detectTollPassages(
     deviceId,
-    records.map((record) => ({ lat: record.gps.latitude, lng: record.gps.longitude, ts: record.timestamp })),
+    records.map((record) => ({
+      lat: record.gps.latitude,
+      lng: record.gps.longitude,
+      ts: record.timestamp,
+      speed: record.gps.speed,
+    })),
   );
 }
 

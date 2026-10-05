@@ -92,6 +92,13 @@
       "when": 1791024480624,
       "tag": "0012_toll_plaza_points",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791221115848,
+      "tag": "0013_toll_passage_confirmed",
+      "breakpoints": true
     }
   ]
 }

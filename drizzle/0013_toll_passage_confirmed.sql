@@ -1,0 +1,1 @@
+ALTER TABLE "toll_passages" ADD COLUMN "confirmed" boolean DEFAULT true NOT NULL;

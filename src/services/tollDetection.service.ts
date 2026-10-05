@@ -21,6 +21,16 @@ const MAX_GAP_MS = 10 * 60_000;
 const MIN_AVG_SPEED_MS = 8 / 3.6;
 // Same vehicle + same station inside this window is one pass (queues, GPS bursts).
 const DEDUPE_WINDOW_MS = 10 * 60_000;
+// OSM often draws one station as two clusters (e.g. entry and exit lanes 500-700 m apart);
+// same name + this close is the same station.
+const SAME_STATION_MAX_M = 2000;
+// A report this close to a gate tells us how fast the vehicle was going where it matters.
+const SPEED_CHECK_RADIUS_M = 150;
+// Toll lanes force a slowdown (Telepass lanes are limited to 30 km/h). A vehicle still going
+// faster than this right next to the gates is on the adjacent mainline, not through the plaza.
+const CRUISING_SPEED_KMH = 70;
+// Name the seed gives stations OSM left unnamed — says nothing about *which* station.
+const UNNAMED_PLAZA = "Peaje sin identificar";
 const PLAZA_CACHE_TTL_MS = 6 * 60 * 60_000;
 // Grid search padding (degrees): station cluster radius (250 m) + detection radius, at any Italian latitude.
 const GRID_MARGIN_DEG = 0.006;
@@ -29,12 +39,30 @@ export interface TrackPoint {
   lat: number;
   lng: number;
   ts: Date;
+  /** km/h */
+  speed: number;
 }
 
 export interface PlazaHit {
   plaza: TollPlaza;
   ts: Date;
   distanceM: number;
+  /** true when a report near the gates showed the vehicle slowed down through them; false
+   * when reports were too sparse near the station to tell either way. */
+  confirmed: boolean;
+}
+
+function nearestGateMeters(point: TrackPoint, gates: Array<[number, number]>): number {
+  let nearest = Infinity;
+  for (const [lat, lng] of gates) nearest = Math.min(nearest, segmentLengthMeters(point, { lat, lng }));
+  return nearest;
+}
+
+type StationRef = Pick<TollPlaza, "id" | "name" | "lat" | "lng">;
+
+function sameStation(a: StationRef, b: StationRef): boolean {
+  if (a.id === b.id) return true;
+  return a.name !== UNNAMED_PLAZA && a.name === b.name && segmentLengthMeters(a, b) <= SAME_STATION_MAX_M;
 }
 
 /** Pure: which stations does the track prev → points[…] pass through, in time order. */
@@ -61,23 +89,34 @@ export function findPlazaHits(
         if (!closest || candidate.distanceM < closest.distanceM) closest = candidate;
       }
       if (!closest || closest.distanceM > DETECTION_RADIUS_M) continue;
-      hits.push({ plaza, ts: new Date(a.ts.getTime() + closest.t * dtMs), distanceM: closest.distanceM });
+
+      const nearGates = [a, b].filter((p) => nearestGateMeters(p, gates) <= SPEED_CHECK_RADIUS_M);
+      if (nearGates.length > 0 && Math.min(...nearGates.map((p) => p.speed)) > CRUISING_SPEED_KMH) continue;
+
+      hits.push({
+        plaza,
+        ts: new Date(a.ts.getTime() + closest.t * dtMs),
+        distanceM: closest.distanceM,
+        confirmed: nearGates.length > 0,
+      });
     }
   }
 
   hits.sort((x, y) => x.ts.getTime() - y.ts.getTime());
 
-  // Two consecutive segments around one station both match it — keep the closest approach.
+  // Consecutive segments (or the two halves of one station) match the same pass — keep the
+  // best evidence: a confirmed slowdown beats an unverified one, then the closest approach.
   const merged: PlazaHit[] = [];
-  const latestByPlaza = new Map<string, PlazaHit>();
   for (const hit of hits) {
-    const same = latestByPlaza.get(hit.plaza.id);
-    if (same && hit.ts.getTime() - same.ts.getTime() <= DEDUPE_WINDOW_MS) {
-      if (hit.distanceM < same.distanceM) Object.assign(same, hit);
+    const existing = [...merged]
+      .reverse()
+      .find((m) => sameStation(m.plaza, hit.plaza) && hit.ts.getTime() - m.ts.getTime() <= DEDUPE_WINDOW_MS);
+    if (!existing) {
+      merged.push(hit);
       continue;
     }
-    merged.push(hit);
-    latestByPlaza.set(hit.plaza.id, hit);
+    const better = hit.confirmed !== existing.confirmed ? hit.confirmed : hit.distanceM < existing.distanceM;
+    if (better) Object.assign(existing, hit);
   }
   return merged;
 }
@@ -94,7 +133,7 @@ async function getPlazaGrid(): Promise<PointGrid<TollPlaza>> {
 
 async function fetchStoredPointBefore(deviceId: string, before: Date): Promise<TrackPoint | undefined> {
   const [row] = await db
-    .select({ lat: positions.lat, lng: positions.lng, ts: positions.ts })
+    .select({ lat: positions.lat, lng: positions.lng, ts: positions.ts, speed: positions.speed })
     .from(positions)
     .where(and(eq(positions.deviceId, deviceId), lt(positions.ts, before)))
     .orderBy(desc(positions.ts))
@@ -105,21 +144,36 @@ async function fetchStoredPointBefore(deviceId: string, before: Date): Promise<T
 async function recordPassage(vehicleId: string, orgId: string, hit: PlazaHit): Promise<void> {
   const windowStart = new Date(hit.ts.getTime() - DEDUPE_WINDOW_MS);
   const windowEnd = new Date(hit.ts.getTime() + DEDUPE_WINDOW_MS);
-  const [existing] = await db
-    .select({ id: tollPassages.id })
+  const recent = await db
+    .select({
+      id: tollPassages.id,
+      confirmed: tollPassages.confirmed,
+      plazaId: tollPlazas.id,
+      name: tollPlazas.name,
+      lat: tollPlazas.lat,
+      lng: tollPlazas.lng,
+    })
     .from(tollPassages)
+    .innerJoin(tollPlazas, eq(tollPassages.plazaId, tollPlazas.id))
     .where(
       and(
         eq(tollPassages.vehicleId, vehicleId),
-        eq(tollPassages.plazaId, hit.plaza.id),
         gte(tollPassages.ts, windowStart),
         lte(tollPassages.ts, windowEnd),
       ),
-    )
-    .limit(1);
-  if (existing) return;
+    );
 
-  await db.insert(tollPassages).values({ orgId, vehicleId, plazaId: hit.plaza.id, ts: hit.ts });
+  const existing = recent.find((r) => sameStation({ id: r.plazaId, name: r.name, lat: r.lat, lng: r.lng }, hit.plaza));
+  if (existing) {
+    if (hit.confirmed && !existing.confirmed) {
+      await db.update(tollPassages).set({ confirmed: true }).where(eq(tollPassages.id, existing.id));
+    }
+    return;
+  }
+
+  await db
+    .insert(tollPassages)
+    .values({ orgId, vehicleId, plazaId: hit.plaza.id, ts: hit.ts, confirmed: hit.confirmed });
 }
 
 /**

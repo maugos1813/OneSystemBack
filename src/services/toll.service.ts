@@ -6,6 +6,7 @@ export interface TollPassageRow {
   id: string;
   ts: Date;
   flagged: boolean;
+  confirmed: boolean;
   vehicleId: string;
   vehicleName: string;
   plate: string | null;
@@ -96,6 +97,7 @@ export async function listTollPassages(query: ListTollPassagesQuery): Promise<To
       id: tollPassages.id,
       ts: tollPassages.ts,
       flagged: tollPassages.flagged,
+      confirmed: tollPassages.confirmed,
       vehicleId: vehicles.id,
       vehicleName: vehicles.name,
       plate: vehicles.plate,

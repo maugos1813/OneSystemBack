@@ -39,6 +39,9 @@ export const tollPassages = pgTable(
     ts: timestamp("ts", { withTimezone: true }).notNull(),
     /** Marked by the org as an unauthorized use of the toll. */
     flagged: boolean("flagged").notNull().default(false),
+    /** A GPS report near the gates showed the vehicle slowed down through them. false = reports
+     * near the station were too sparse to tell a real pass from a mainline running past it. */
+    confirmed: boolean("confirmed").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
