@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { getApiKey } from "../../services/apiKey.service.js";
 import { DEFAULT_SPEED_LIMIT_KMH, DRIVING_RULES, getDrivingStyle } from "../../services/drivingStyle.service.js";
+import { MAX_WINDOW_DAYS, resolveDrivingWindow } from "../../services/drivingWindow.js";
 import { getDeviceEvents, getPositionHistory } from "../../services/position.service.js";
 import { listPublicVehicles, toPublicEvent, toPublicPosition } from "../../services/publicVehicle.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
@@ -117,7 +118,7 @@ const rulesSchema = {
 } as const;
 
 const periodProperties = {
-  days: { type: "integer" },
+  days: { type: "integer", nullable: true, description: "Días pedidos con `days`; null si se pidió un tramo exacto con `from`/`to`" },
   speedLimitKmh: { type: "number" },
   from: { type: "string", format: "date-time" },
   to: { type: "string", format: "date-time" },
@@ -134,11 +135,6 @@ const rangeQuery = z.object({
   limit: z.coerce.number().int().positive().max(5000).optional(),
 });
 
-const styleQuery = z.object({
-  days: z.coerce.number().int().min(1).max(31).default(7),
-  speedLimit: z.coerce.number().min(10).max(300).default(DEFAULT_SPEED_LIMIT_KMH),
-});
-
 const rangeQueryDoc = {
   type: "object",
   properties: {
@@ -151,7 +147,31 @@ const rangeQueryDoc = {
 const styleQueryDoc = {
   type: "object",
   properties: {
-    days: { type: "integer", minimum: 1, maximum: 31, default: 7, description: "Window ending now" },
+    days: {
+      type: "integer",
+      minimum: 1,
+      maximum: MAX_WINDOW_DAYS,
+      default: 7,
+      description:
+        "Ventana de los últimos N días, terminando ahora. **Se ignora si envías `from` y `to`** " +
+        "(si lo incluyes junto a ellos debe seguir siendo un valor válido).",
+    },
+    from: {
+      type: "string",
+      format: "date-time",
+      description:
+        "Inicio exacto del tramo (ISO 8601, inclusive), p. ej. el inicio del turno de un chofer. " +
+        "Debe enviarse junto con `to`; entonces reemplaza a `days`.",
+    },
+    to: {
+      type: "string",
+      format: "date-time",
+      description:
+        "Fin exacto del tramo (ISO 8601, inclusive). Si está en el futuro se recorta a \"ahora\". " +
+        `Debe ser posterior a \`from\` y el tramo no puede superar ${MAX_WINDOW_DAYS} días. ` +
+        "Solo cuentan las posiciones dentro del tramo: un incidente que empiece fuera no se cuenta, y un exceso de " +
+        "velocidad que cruce el borde se evalúa solo con la parte de dentro.",
+    },
     speedLimit: {
       type: "number",
       minimum: 10,
@@ -161,6 +181,13 @@ const styleQueryDoc = {
     },
   },
 } as const;
+
+const WINDOW_DOC =
+  "**Tramo exacto:** con `from` y `to` se calcula solo ese intervalo (útil para puntuar a un chofer en su horario). " +
+  "`from` y `to` van siempre juntos, `from` < `to`, máximo 31 días; el rango efectivo se devuelve en `from`/`to`. " +
+  "**Datos crudos:** `incidents`, `distanceKm`, `drivingHours`, `trips`, `samples` y `quality` se devuelven siempre, " +
+  "aunque `scores` sea null (p. ej. `insufficient_data` por menos de 20 km): así puedes sumar incidentes y km de varios " +
+  "tramos y calcular el puntaje con la misma fórmula. Una categoría que el dispositivo no puede detectar viene como null. ";
 
 const DOCS_HTML = `<!doctype html>
 <html lang="es">
@@ -373,7 +400,9 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
             "no se penaliza frente a uno que maneja poco. Frenadas, aceleraciones y giros bruscos se detectan por su " +
             "aceleración física (m/s²); un exceso de velocidad cuenta si se mantiene al menos " +
             `${DRIVING_RULES.speedingMinSeconds} s. \`overall\` es el promedio de las categorías disponibles. ` +
-            "Revisa `quality` antes de usar los puntajes. Los resultados se cachean 5 minutos.",
+            "Revisa `quality` antes de usar los puntajes. " +
+            WINDOW_DOC +
+            "Los resultados se cachean 5 minutos (1 hora si el tramo `to` terminó hace más de 10 minutos).",
           security: DOC_SECURITY,
           querystring: styleQueryDoc,
           response: {
@@ -386,13 +415,16 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
         },
       },
       async (request, reply) => {
-        const parsed = styleQuery.safeParse(request.query);
-        if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+        const resolved = resolveDrivingWindow(request.query);
+        if (!resolved.ok) return reply.code(400).send({ error: resolved.error });
+        const { window } = resolved;
         const result = await getDrivingStyle({
           orgId: request.user.orgId,
           allowedArea: request.user.allowedArea,
-          days: parsed.data.days,
-          speedLimitKmh: parsed.data.speedLimit,
+          days: window.days,
+          from: window.from,
+          to: window.to,
+          speedLimitKmh: window.speedLimitKmh,
         });
         return { ...result, rules: DRIVING_RULES };
       },
@@ -404,6 +436,10 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
         schema: {
           tags: ["Estilo de conducción"],
           summary: "Puntajes de estilo de conducción de un vehículo",
+          description:
+            "Mismas reglas y fórmula que `/v1/driving-style`, para un solo vehículo. " +
+            WINDOW_DOC +
+            "Los resultados se cachean 5 minutos (1 hora si el tramo `to` terminó hace más de 10 minutos).",
           security: DOC_SECURITY,
           params: idParams,
           querystring: styleQueryDoc,
@@ -412,15 +448,18 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
       },
       async (request, reply) => {
         const { id } = request.params as { id: string };
-        const parsed = styleQuery.safeParse(request.query);
-        if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+        const resolved = resolveDrivingWindow(request.query);
+        if (!resolved.ok) return reply.code(400).send({ error: resolved.error });
+        const { window } = resolved;
 
         const result = await getDrivingStyle({
           orgId: request.user.orgId,
           allowedArea: request.user.allowedArea,
           vehicleId: id,
-          days: parsed.data.days,
-          speedLimitKmh: parsed.data.speedLimit,
+          days: window.days,
+          from: window.from,
+          to: window.to,
+          speedLimitKmh: window.speedLimitKmh,
         });
         const [vehicle] = result.vehicles;
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });

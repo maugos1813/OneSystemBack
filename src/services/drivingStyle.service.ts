@@ -43,7 +43,7 @@ const MIN_DENSE_SHARE = 0.5;
 
 export const DEFAULT_SPEED_LIMIT_KMH = 120;
 const CACHE_TTL_MS = 5 * 60_000;
-const CACHE_MAX_ENTRIES = 200;
+const CACHE_MAX_ENTRIES = 500;
 
 export const DRIVING_RULES = {
   harshBrakingMs2: HARSH_BRAKING_MS2,
@@ -143,23 +143,30 @@ export function summarize(stats: RawStats | undefined): Omit<VehicleDrivingStyle
     trips: stats.trips,
   };
 
+  // Whether the device reported densely enough to see harsh events at all. With no distance to
+  // judge by (parked), there is nothing to contradict the counts, so they stand.
+  const detectable = stats.distanceKm === 0 || stats.denseKm / stats.distanceKm >= MIN_DENSE_SHARE;
+
   if (stats.distanceKm < MIN_DISTANCE_KM) {
+    // Too short to score — but the raw counts are still returned, so a caller can add up many
+    // short stretches and score the total with the same formula.
     return {
       ...base,
       quality: "insufficient_data",
       scores: null,
-      incidents: {
-        harshBraking: stats.harshBraking,
-        harshAcceleration: stats.harshAcceleration,
-        harshCornering: stats.harshCornering,
-        speeding: stats.speeding,
-      },
+      incidents: detectable
+        ? {
+            harshBraking: stats.harshBraking,
+            harshAcceleration: stats.harshAcceleration,
+            harshCornering: stats.harshCornering,
+            speeding: stats.speeding,
+          }
+        : { harshBraking: null, harshAcceleration: null, harshCornering: null, speeding: stats.speeding },
       incidentsPer100Km: null,
     };
   }
 
   const per100 = (n: number) => round1((n / stats.distanceKm) * 100);
-  const detectable = stats.denseKm / stats.distanceKm >= MIN_DENSE_SHARE;
 
   const speeding = scoreFromRate(per100(stats.speeding));
   const harsh = detectable
@@ -228,7 +235,7 @@ const isCornering = sql`dt > 0 and dt <= ${MAX_DENSE_GAP_S} and speed >= ${MIN_C
   and p_speed >= ${MIN_CORNERING_SPEED_KMH}
   and ((speed + p_speed) / 2.0 / 3.6) * radians(angle_delta) / dt >= ${HARSH_CORNERING_MS2}`;
 
-async function queryStats(deviceIds: string[], from: Date, to: Date, speedLimitKmh: number): Promise<Map<string, RawStats>> {
+export async function queryStats(deviceIds: string[], from: Date, to: Date, speedLimitKmh: number): Promise<Map<string, RawStats>> {
   if (deviceIds.length === 0) return new Map();
   const ids = idList(deviceIds);
   const plausible = sql`seg_km / (dt / 3600.0) < ${MAX_PLAUSIBLE_KMH}`;
@@ -312,31 +319,41 @@ export interface DrivingStyleQuery {
   vehicleId?: string;
   /** Window ending now; ignored when `from` is given. */
   days: number;
-  /** Start of the window (internal use, e.g. "since midnight"); overrides `days`. */
+  /** Start of the window; overrides `days`. */
   from?: Date;
+  /** End of the window (only with `from`); omitted = now. The caller has already validated it. */
+  to?: Date;
   speedLimitKmh: number;
 }
 
 export interface DrivingStyleResult {
-  days: number;
+  /** null when an exact from/to window was requested. */
+  days: number | null;
   speedLimitKmh: number;
   from: Date;
   to: Date;
   vehicles: VehicleDrivingStyle[];
 }
 
+/** A stretch that ended long ago can't change (barring late-arriving buffered reports). */
+const CLOSED_WINDOW_AFTER_MS = 10 * 60_000;
+const CLOSED_WINDOW_CACHE_TTL_MS = 60 * 60_000;
+
 export async function getDrivingStyle(query: DrivingStyleQuery): Promise<DrivingStyleResult> {
-  const to = new Date();
+  const exactWindow = query.from !== undefined && query.to !== undefined;
+  const to = query.to ?? new Date();
   const from = query.from ?? new Date(to.getTime() - query.days * 24 * 60 * 60 * 1000);
   const result = (vehicles: VehicleDrivingStyle[]): DrivingStyleResult => ({
-    days: query.days,
+    days: exactWindow ? null : query.days,
     speedLimitKmh: query.speedLimitKmh,
     from,
     to,
     vehicles,
   });
 
-  const cacheKey = `${query.orgId}|${query.allowedArea ?? ""}|${query.vehicleId ?? "*"}|${query.from?.toISOString() ?? query.days}|${query.speedLimitKmh}`;
+  // Exact windows are keyed by both ends; `days`/since-midnight requests keep their original key.
+  const windowKey = exactWindow ? `${from.toISOString()}..${to.toISOString()}` : (query.from?.toISOString() ?? query.days);
+  const cacheKey = `${query.orgId}|${query.allowedArea ?? ""}|${query.vehicleId ?? "*"}|${windowKey}|${query.speedLimitKmh}`;
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return result(cached.value);
 
@@ -354,8 +371,9 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
     ...summarize(v.deviceId ? statsByDevice.get(v.deviceId) : undefined),
   }));
 
-  if (cache.size >= CACHE_MAX_ENTRIES) cache.clear();
-  cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, value: vehicles });
+  const closed = exactWindow && Date.now() - to.getTime() > CLOSED_WINDOW_AFTER_MS;
+  if (cache.size >= CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value!); // oldest first
+  cache.set(cacheKey, { expiresAt: Date.now() + (closed ? CLOSED_WINDOW_CACHE_TTL_MS : CACHE_TTL_MS), value: vehicles });
   return result(vehicles);
 }
 
