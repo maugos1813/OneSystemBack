@@ -17,6 +17,9 @@ export const apiKeys = pgTable("api_keys", {
   /** First few characters of the plaintext key, e.g. "osk_live_a1b2c3", so the owner
    * can recognize which key is which in a list without ever seeing the full value again. */
   keyPrefix: varchar("key_prefix", { length: 20 }).notNull(),
+  /** Hard restriction to one área (e.g. "DHL") — the key only ever sees that área's vehicles.
+   * null = full access to the whole organization's fleet. */
+  allowedArea: varchar("allowed_area", { length: 50 }),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

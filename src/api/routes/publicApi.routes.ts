@@ -2,7 +2,8 @@ import swagger from "@fastify/swagger";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { env } from "../../config/env.js";
-import { DEFAULT_SPEED_LIMIT_KMH, getDrivingStyle } from "../../services/drivingStyle.service.js";
+import { getApiKey } from "../../services/apiKey.service.js";
+import { DEFAULT_SPEED_LIMIT_KMH, DRIVING_RULES, getDrivingStyle } from "../../services/drivingStyle.service.js";
 import { getDeviceEvents, getPositionHistory } from "../../services/position.service.js";
 import { listPublicVehicles, toPublicEvent, toPublicPosition } from "../../services/publicVehicle.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
@@ -43,38 +44,75 @@ const vehicleSchema = {
   },
 } as const;
 
+const nullableInt = { type: "integer", nullable: true } as const;
+const nullableNumber = { type: "number", nullable: true } as const;
+
 const scoresSchema = {
   type: "object",
+  nullable: true,
+  description: "1-100 (100 = sin incidentes). null si no hay datos suficientes (ver `quality`).",
   properties: {
     overall: { type: "number" },
-    harshBraking: { type: "number" },
-    harshAcceleration: { type: "number" },
-    harshCornering: { type: "number" },
+    harshBraking: nullableNumber,
+    harshAcceleration: nullableNumber,
+    harshCornering: nullableNumber,
     speeding: { type: "number" },
     grade: { type: "string", enum: ["A+", "A", "B", "C", "D"] },
   },
 } as const;
 
-const countsSchema = {
-  type: "object",
-  properties: {
-    harshBraking: { type: "integer" },
-    harshAcceleration: { type: "integer" },
-    harshCornering: { type: "integer" },
-    speeding: { type: "integer" },
+const vehicleStyleProperties = {
+  vehicleId: { type: "string", format: "uuid" },
+  name: { type: "string" },
+  plate: { type: "string", nullable: true },
+  fleetGroup: { type: "string", nullable: true },
+  samples: { type: "integer", description: "Reportes GPS analizados. 0 = sin datos (no significa manejo perfecto)." },
+  distanceKm: { type: "number", description: "Distancia recorrida en el periodo" },
+  drivingHours: { type: "number", description: "Horas en movimiento" },
+  trips: { type: "integer" },
+  quality: {
+    type: "string",
+    enum: ["full", "speeding_only", "insufficient_data", "no_data"],
+    description:
+      "full: todos los puntajes. speeding_only: el dispositivo reporta muy espaciado para detectar frenadas/aceleraciones/giros bruscos, solo se puntúa la velocidad. " +
+      "insufficient_data: menos de 20 km en el periodo. no_data: sin reportes.",
+  },
+  scores: scoresSchema,
+  incidents: {
+    type: "object",
+    description: "Cantidad de incidentes. null en las categorías que no se pueden detectar.",
+    properties: {
+      harshBraking: nullableInt,
+      harshAcceleration: nullableInt,
+      harshCornering: nullableInt,
+      speeding: { type: "integer" },
+    },
+  },
+  incidentsPer100Km: {
+    type: "object",
+    nullable: true,
+    description: "Incidentes por cada 100 km recorridos: es la base de los puntajes.",
+    properties: {
+      harshBraking: nullableNumber,
+      harshAcceleration: nullableNumber,
+      harshCornering: nullableNumber,
+      speeding: { type: "number" },
+    },
   },
 } as const;
 
-const vehicleStyleSchema = {
+const vehicleStyleSchema = { type: "object", properties: vehicleStyleProperties } as const;
+
+const rulesSchema = {
   type: "object",
+  description: "Reglas con las que se calculó (umbrales físicos y escala de puntos).",
   properties: {
-    vehicleId: { type: "string", format: "uuid" },
-    name: { type: "string" },
-    plate: { type: "string", nullable: true },
-    fleetGroup: { type: "string", nullable: true },
-    samples: { type: "integer", description: "GPS reports analysed. 0 = no data (not perfect driving)." },
-    scores: { ...scoresSchema, nullable: true },
-    incidents: countsSchema,
+    harshBrakingMs2: { type: "number" },
+    harshAccelerationMs2: { type: "number" },
+    harshCorneringMs2: { type: "number" },
+    speedingMinSeconds: { type: "number" },
+    pointsPerIncidentPer100Km: { type: "number" },
+    minDistanceKm: { type: "number" },
   },
 } as const;
 
@@ -158,6 +196,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
       },
       servers: [{ url: env.PUBLIC_API_URL, description: "API" }],
       tags: [
+        { name: "Acceso", description: "Qué puede ver la API key que estás usando" },
         { name: "Vehículos", description: "Vehículos y su última posición" },
         { name: "Posiciones", description: "Histórico de posiciones y eventos" },
         { name: "Estilo de conducción", description: "Puntajes de manejo (1-100) por vehículo" },
@@ -178,6 +217,36 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
     secured.addHook("onRequest", rateLimitApiKey);
 
     secured.get(
+      "/key",
+      {
+        schema: {
+          tags: ["Acceso"],
+          summary: "Alcance de la API key que estás usando",
+          description:
+            "`access: \"all\"` = ve toda la flota de la organización. `access: \"area\"` = solo ve los vehículos de `area`.",
+          security: DOC_SECURITY,
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                keyPrefix: { type: "string" },
+                access: { type: "string", enum: ["all", "area"] },
+                area: { type: "string", nullable: true },
+              },
+            },
+            ...ERRORS,
+          },
+        },
+      },
+      async (request, reply) => {
+        const key = await getApiKey(request.apiKeyId!);
+        if (!key) return reply.code(404).send({ error: "API key not found" });
+        return { name: key.name, keyPrefix: key.keyPrefix, access: key.allowedArea ? "area" : "all", area: key.allowedArea };
+      },
+    );
+
+    secured.get(
       "/vehicles",
       {
         schema: {
@@ -187,7 +256,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
           response: { 200: { type: "array", items: vehicleSchema }, ...ERRORS },
         },
       },
-      async (request) => listPublicVehicles(request.user.orgId),
+      async (request) => listPublicVehicles(request.user.orgId, { allowedArea: request.user.allowedArea }),
     );
 
     secured.get(
@@ -203,7 +272,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
       },
       async (request, reply) => {
         const { id } = request.params as { id: string };
-        const [vehicle] = await listPublicVehicles(request.user.orgId, id);
+        const [vehicle] = await listPublicVehicles(request.user.orgId, { vehicleId: id, allowedArea: request.user.allowedArea });
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
         return vehicle;
       },
@@ -222,7 +291,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
       },
       async (request, reply) => {
         const { id } = request.params as { id: string };
-        const [vehicle] = await listPublicVehicles(request.user.orgId, id);
+        const [vehicle] = await listPublicVehicles(request.user.orgId, { vehicleId: id, allowedArea: request.user.allowedArea });
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
         if (!vehicle.lastPosition) return reply.code(404).send({ error: "No positions recorded yet" });
         return vehicle.lastPosition;
@@ -246,7 +315,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
         const parsed = rangeQuery.safeParse(request.query);
         if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-        const vehicle = await getVehicleForOrg(request.user.orgId, id);
+        const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
         if (!vehicle.deviceId) return [];
 
@@ -284,7 +353,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
         const parsed = rangeQuery.safeParse(request.query);
         if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-        const vehicle = await getVehicleForOrg(request.user.orgId, id);
+        const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
         if (!vehicle.deviceId) return [];
 
@@ -299,13 +368,19 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
           tags: ["Estilo de conducción"],
           summary: "Puntajes de estilo de conducción de toda la flota",
           description:
-            "Cada puntaje va de 1 a 100 (100 = sin incidentes; cada incidente resta 6 puntos, mínimo 1). " +
-            "`overall` es el promedio de las cuatro categorías. Un tramo continuo sobre el límite de velocidad " +
-            "cuenta como un solo incidente. Los resultados se cachean 5 minutos.",
+            "Cada puntaje va de 1 a 100 (100 = sin incidentes). Se calcula por cada 100 km recorridos —cada incidente " +
+            `por 100 km resta ${DRIVING_RULES.pointsPerIncidentPer100Km} puntos, mínimo 1—, así que un vehículo que maneja mucho ` +
+            "no se penaliza frente a uno que maneja poco. Frenadas, aceleraciones y giros bruscos se detectan por su " +
+            "aceleración física (m/s²); un exceso de velocidad cuenta si se mantiene al menos " +
+            `${DRIVING_RULES.speedingMinSeconds} s. \`overall\` es el promedio de las categorías disponibles. ` +
+            "Revisa `quality` antes de usar los puntajes. Los resultados se cachean 5 minutos.",
           security: DOC_SECURITY,
           querystring: styleQueryDoc,
           response: {
-            200: { type: "object", properties: { ...periodProperties, vehicles: { type: "array", items: vehicleStyleSchema } } },
+            200: {
+              type: "object",
+              properties: { ...periodProperties, rules: rulesSchema, vehicles: { type: "array", items: vehicleStyleSchema } },
+            },
             ...ERRORS,
           },
         },
@@ -313,7 +388,13 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
       async (request, reply) => {
         const parsed = styleQuery.safeParse(request.query);
         if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-        return getDrivingStyle({ orgId: request.user.orgId, days: parsed.data.days, speedLimitKmh: parsed.data.speedLimit });
+        const result = await getDrivingStyle({
+          orgId: request.user.orgId,
+          allowedArea: request.user.allowedArea,
+          days: parsed.data.days,
+          speedLimitKmh: parsed.data.speedLimit,
+        });
+        return { ...result, rules: DRIVING_RULES };
       },
     );
 
@@ -326,7 +407,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
           security: DOC_SECURITY,
           params: idParams,
           querystring: styleQueryDoc,
-          response: { 200: { type: "object", properties: { ...periodProperties, ...vehicleStyleSchema.properties } }, ...ERRORS },
+          response: { 200: { type: "object", properties: { ...periodProperties, rules: rulesSchema, ...vehicleStyleProperties } }, ...ERRORS },
         },
       },
       async (request, reply) => {
@@ -336,13 +417,14 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
 
         const result = await getDrivingStyle({
           orgId: request.user.orgId,
+          allowedArea: request.user.allowedArea,
           vehicleId: id,
           days: parsed.data.days,
           speedLimitKmh: parsed.data.speedLimit,
         });
         const [vehicle] = result.vehicles;
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
-        return { days: result.days, speedLimitKmh: result.speedLimitKmh, from: result.from, to: result.to, ...vehicle };
+        return { days: result.days, speedLimitKmh: result.speedLimitKmh, from: result.from, to: result.to, rules: DRIVING_RULES, ...vehicle };
       },
     );
   });

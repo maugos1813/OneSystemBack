@@ -15,13 +15,14 @@ export interface CreatedApiKey {
   plaintextKey: string;
 }
 
-export async function createApiKey(orgId: string, name: string): Promise<CreatedApiKey> {
+export async function createApiKey(orgId: string, name: string, allowedArea: string | null = null): Promise<CreatedApiKey> {
   const plaintextKey = `${KEY_PREFIX}${randomBytes(24).toString("hex")}`;
   const [record] = await db
     .insert(apiKeys)
     .values({
       orgId,
       name,
+      allowedArea,
       keyHash: hashKey(plaintextKey),
       keyPrefix: plaintextKey.slice(0, 16),
     })
@@ -44,6 +45,8 @@ export async function revokeApiKey(orgId: string, id: string): Promise<boolean> 
 export interface AuthenticatedApiKey {
   orgId: string;
   keyId: string;
+  /** null = the key sees the whole organization. */
+  allowedArea: string | null;
 }
 
 /** Looks up an active (non-revoked) key by its plaintext value and touches lastUsedAt.
@@ -58,9 +61,14 @@ export async function authenticateApiKey(plaintextKey: string): Promise<Authenti
   if (!record) return null;
 
   await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, record.id));
-  return { orgId: record.orgId, keyId: record.id };
+  return { orgId: record.orgId, keyId: record.id, allowedArea: record.allowedArea };
 }
 
 export function looksLikeApiKey(value: string): boolean {
   return value.startsWith(KEY_PREFIX);
+}
+
+export async function getApiKey(id: string): Promise<ApiKey | undefined> {
+  const [record] = await db.select().from(apiKeys).where(eq(apiKeys.id, id)).limit(1);
+  return record;
 }

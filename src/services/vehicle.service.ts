@@ -52,3 +52,13 @@ export async function deleteVehicle(orgId: string, vehicleId: string): Promise<b
   const result = await db.delete(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.orgId, orgId)));
   return (result.rowCount ?? 0) > 0;
 }
+
+/** Whether any of the org's vehicles belongs to this área (used to reject typos when scoping a key). */
+export async function fleetGroupExists(orgId: string, fleetGroup: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: vehicles.id })
+    .from(vehicles)
+    .where(and(eq(vehicles.orgId, orgId), eq(vehicles.fleetGroup, fleetGroup)))
+    .limit(1);
+  return !!row;
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildApp } from "../../src/api/app.js";
 import { FixedWindowLimiter } from "../../src/api/middlewares/rateLimit.js";
 import { isApiKeyRequestAllowed } from "../../src/api/middlewares/auth.middleware.js";
-import { computeScores, scoreGrade } from "../../src/services/drivingStyle.service.js";
+import { scoreFromRate, scoreGrade, summarize, type RawStats } from "../../src/services/drivingStyle.service.js";
 import { ignitionFrom, toPublicPosition } from "../../src/services/publicVehicle.service.js";
 
 const KEY = "osk_live_0000000000000000000000000000000000000000000000";
@@ -129,15 +129,55 @@ describe("FixedWindowLimiter", () => {
 });
 
 describe("driving-style scores", () => {
-  it("score 100 with no incidents and subtract 6 per incident, never below 1", () => {
-    const clean = computeScores({ harshBraking: 0, harshAcceleration: 0, harshCornering: 0, speeding: 0 });
-    expect(clean).toEqual({ harshBraking: 100, harshAcceleration: 100, harshCornering: 100, speeding: 100, overall: 100 });
+  const stats = (over: Partial<RawStats> = {}): RawStats => ({
+    samples: 10_000,
+    distanceKm: 1000,
+    denseKm: 990,
+    movingSeconds: 50_000,
+    trips: 8,
+    harshBraking: 0,
+    harshAcceleration: 0,
+    harshCornering: 0,
+    speeding: 0,
+    ...over,
+  });
 
-    const some = computeScores({ harshBraking: 5, harshAcceleration: 0, harshCornering: 2, speeding: 100 });
-    expect(some.harshBraking).toBe(70);
-    expect(some.harshCornering).toBe(88);
-    expect(some.speeding).toBe(1);
-    expect(some.overall).toBe(Math.round((70 + 100 + 88 + 1) / 4));
+  it("scales by distance: the same incidents over more kilometres score better", () => {
+    expect(scoreFromRate(0)).toBe(100);
+    expect(scoreFromRate(2)).toBe(90);
+    expect(scoreFromRate(100)).toBe(1);
+
+    const shortRun = summarize(stats({ distanceKm: 100, harshBraking: 10 }));
+    const longRun = summarize(stats({ distanceKm: 1000, harshBraking: 10 }));
+    expect(shortRun.scores!.harshBraking).toBe(50); // 10 per 100 km
+    expect(longRun.scores!.harshBraking).toBe(95); // 1 per 100 km
+  });
+
+  it("averages the four categories into overall and grades it", () => {
+    const s = summarize(stats({ harshBraking: 28, harshAcceleration: 18, harshCornering: 26, speeding: 103 }));
+    expect(s.quality).toBe("full");
+    expect(s.incidentsPer100Km).toEqual({ harshBraking: 2.8, harshAcceleration: 1.8, harshCornering: 2.6, speeding: 10.3 });
+    expect(s.scores).toMatchObject({ harshBraking: 86, harshAcceleration: 91, harshCornering: 87, speeding: 49, overall: 78, grade: "A" });
+  });
+
+  it("does not score tiny distances, and says why", () => {
+    const s = summarize(stats({ distanceKm: 5, harshBraking: 3 }));
+    expect(s.quality).toBe("insufficient_data");
+    expect(s.scores).toBeNull();
+    expect(s.incidentsPer100Km).toBeNull();
+  });
+
+  it("reports no data as no data, never as perfect driving", () => {
+    expect(summarize(undefined).quality).toBe("no_data");
+    expect(summarize(undefined).scores).toBeNull();
+    expect(summarize(stats({ samples: 0 })).scores).toBeNull();
+  });
+
+  it("scores only speed when the device reports too sparsely to see harsh events", () => {
+    const s = summarize(stats({ denseKm: 100, speeding: 20 })); // 10% dense coverage
+    expect(s.quality).toBe("speeding_only");
+    expect(s.scores).toMatchObject({ harshBraking: null, harshAcceleration: null, harshCornering: null, speeding: 90, overall: 90 });
+    expect(s.incidents.harshBraking).toBeNull();
   });
 
   it("grades like the app", () => {

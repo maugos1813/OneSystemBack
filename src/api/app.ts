@@ -10,6 +10,7 @@ import { registerRealtimeGateway } from "../realtime/gateway.js";
 import { apiKeysRoutes } from "./routes/apiKeys.routes.js";
 import { authRoutes } from "./routes/auth.routes.js";
 import { devicesRoutes } from "./routes/devices.routes.js";
+import { drivingStyleRoutes } from "./routes/drivingStyle.routes.js";
 import { geofencesRoutes } from "./routes/geofences.routes.js";
 import { positionsRoutes } from "./routes/positions.routes.js";
 import { productsRoutes } from "./routes/products.routes.js";
@@ -78,6 +79,7 @@ export async function buildApp() {
   await app.register(geofencesRoutes);
   await app.register(productsRoutes);
   await app.register(teamUsersRoutes);
+  await app.register(drivingStyleRoutes);
   await app.register(publicApiRoutes, { prefix: "/v1" });
   await app.register(tollsRoutes);
   await app.register(registerRealtimeGateway);

@@ -3,9 +3,14 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ApiKey } from "../../db/schema/index.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../services/apiKey.service.js";
+import { fleetGroupExists } from "../../services/vehicle.service.js";
 import { requireRole } from "../middlewares/auth.middleware.js";
 
-const createSchema = z.object({ name: z.string().min(2).max(100) });
+const createSchema = z.object({
+  name: z.string().min(2).max(100),
+  // Limit the key to one área (e.g. "DHL"). Omitted/null = full access to the whole fleet.
+  allowedArea: z.string().min(1).max(50).nullable().optional(),
+});
 
 /** The key's hash is never sent back to the client. */
 function serializeApiKey(key: ApiKey) {
@@ -13,6 +18,7 @@ function serializeApiKey(key: ApiKey) {
     id: key.id,
     orgId: key.orgId,
     name: key.name,
+    allowedArea: key.allowedArea,
     keyPrefix: key.keyPrefix,
     lastUsedAt: key.lastUsedAt,
     revokedAt: key.revokedAt,
@@ -67,7 +73,17 @@ export async function apiKeysRoutes(app: FastifyInstance): Promise<void> {
       const parsed = createSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-      const { record, plaintextKey } = await createApiKey(request.user.orgId, parsed.data.name);
+      // A user who is themselves limited to an área can only mint keys for that same área.
+      const allowedArea = request.user.allowedArea ?? parsed.data.allowedArea ?? null;
+      if (parsed.data.allowedArea && request.user.allowedArea && parsed.data.allowedArea !== request.user.allowedArea) {
+        return reply.code(403).send({ error: "You can only create keys for your own área" });
+      }
+      // An área that matches no vehicle would silently produce a key that sees nothing.
+      if (allowedArea && !(await fleetGroupExists(request.user.orgId, allowedArea))) {
+        return reply.code(400).send({ error: `Unknown área "${allowedArea}"` });
+      }
+
+      const { record, plaintextKey } = await createApiKey(request.user.orgId, parsed.data.name, allowedArea);
       // The plaintext key is only ever sent this one time — the server never stores it.
       return reply.code(201).send({ ...serializeApiKey(record), key: plaintextKey });
     },

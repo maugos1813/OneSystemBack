@@ -99,6 +99,13 @@
       "when": 1791221115848,
       "tag": "0013_toll_passage_confirmed",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791611893010,
+      "tag": "0014_api_key_allowed_area",
+      "breakpoints": true
     }
   ]
 }

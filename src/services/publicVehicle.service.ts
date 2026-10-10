@@ -94,7 +94,10 @@ function rowToVehicle(row: VehicleRow): PublicVehicle {
 
 /** Vehicles with their latest position in one query — a lateral lookup per vehicle that
  * uses the (device_id, ts DESC) index, instead of one request per vehicle. */
-export async function listPublicVehicles(orgId: string, vehicleId?: string): Promise<PublicVehicle[]> {
+export async function listPublicVehicles(
+  orgId: string,
+  { vehicleId, allowedArea }: { vehicleId?: string; allowedArea?: string | null } = {},
+): Promise<PublicVehicle[]> {
   const { rows } = await db.execute<VehicleRow>(sql`
     select v.id, v.name, v.plate, v.fleet_group,
            p.ts as p_ts, p.lat as p_lat, p.lng as p_lng, p.speed as p_speed, p.angle as p_angle,
@@ -107,7 +110,9 @@ export async function listPublicVehicles(orgId: string, vehicleId?: string): Pro
       order by ts desc
       limit 1
     ) p on true
-    where v.org_id = ${orgId} ${vehicleId ? sql`and v.id = ${vehicleId}` : sql``}
+    where v.org_id = ${orgId}
+      ${vehicleId ? sql`and v.id = ${vehicleId}` : sql``}
+      ${allowedArea ? sql`and v.fleet_group = ${allowedArea}` : sql``}
     order by v.name
   `);
   return rows.map(rowToVehicle);

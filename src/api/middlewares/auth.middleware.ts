@@ -39,7 +39,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     }
     // "viewer", not "owner": even if a write route were ever exposed by mistake, the
     // role checks on mutations would still refuse an API key.
-    request.user = { userId: "api-key", orgId: result.orgId, role: "viewer" };
+    request.user = { userId: "api-key", orgId: result.orgId, role: "viewer", allowedArea: result.allowedArea };
     request.apiKeyId = result.keyId;
     return;
   }
