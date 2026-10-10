@@ -17,7 +17,7 @@ import {
 } from "../../services/teamUser.service.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 const MANAGE_ROLES = requireRole("owner", "admin");
 // "manager" may also create/edit/delete team members, but only its own sub-users — the
 // handlers below re-check that with canManageOther() on top of this coarse role gate.

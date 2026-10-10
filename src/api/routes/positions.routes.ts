@@ -29,7 +29,7 @@ const rangeQueryJsonSchema = {
   },
 };
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 
 export async function positionsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);

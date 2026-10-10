@@ -44,7 +44,7 @@ const updateSchema = z.object({
   alertOnExit: z.boolean(),
 }).partial();
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 const MANAGE_GEOFENCES = requireRole("owner", "admin");
 
 export async function geofencesRoutes(app: FastifyInstance): Promise<void> {

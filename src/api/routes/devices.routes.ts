@@ -6,7 +6,7 @@ import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const claimSchema = z.object({ imei: z.string().min(10).max(20) });
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 
 export async function devicesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);

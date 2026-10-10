@@ -22,7 +22,7 @@ const createSchema = z.object({
 
 const updateSchema = createSchema.partial();
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 // Mutating a vehicle (including reassigning its área) is left to owner/admin only — a
 // manager/viewer restricted to one área could otherwise edit a vehicle's fleetGroup to
 // pull it into their own área, or edit one outside their área if they guessed its id.

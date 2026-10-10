@@ -30,7 +30,7 @@ const listQuerySchema = z.object({
 
 const flagSchema = z.object({ flagged: z.boolean() });
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 // Deciding which passages count as unauthorized is an owner/admin call, like the other
 // org-wide settings.
 const MANAGE_TOLLS = requireRole("owner", "admin");

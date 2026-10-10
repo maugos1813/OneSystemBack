@@ -43,7 +43,7 @@ const updateSchema = z.object({
   alerts: alertsSchema.optional(),
 });
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);

@@ -13,6 +13,8 @@ const envSchema = z.object({
   // Public base URL of this API, shown as the server in the OpenAPI docs (/docs).
   PUBLIC_API_URL: z.string().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  // Max requests per minute for each API key on the public /v1 API.
+  PUBLIC_API_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(120),
   // Email alerts (Resend). Left unset, the alert scheduler still runs (so idling/geofence
   // state keeps ticking) but silently skips sending — fine for local dev.
   RESEND_API_KEY: z.string().optional(),

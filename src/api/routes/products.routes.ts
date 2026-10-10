@@ -4,7 +4,7 @@ import { getProductsForUser } from "../../services/product.service.js";
 import { createSsoTicket } from "../../services/sso.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
-const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }, { apiKeyAuth: [] }];
+const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 
 export async function productsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);

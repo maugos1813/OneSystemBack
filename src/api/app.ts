@@ -13,6 +13,7 @@ import { devicesRoutes } from "./routes/devices.routes.js";
 import { geofencesRoutes } from "./routes/geofences.routes.js";
 import { positionsRoutes } from "./routes/positions.routes.js";
 import { productsRoutes } from "./routes/products.routes.js";
+import { publicApiRoutes } from "./routes/publicApi.routes.js";
 import { settingsRoutes } from "./routes/settings.routes.js";
 import { teamUsersRoutes } from "./routes/teamUsers.routes.js";
 import { tollsRoutes } from "./routes/tolls.routes.js";
@@ -30,14 +31,15 @@ export async function buildApp() {
   await app.register(jwt, { secret: env.JWT_SECRET });
 
   await app.register(swagger, {
+    // The public /v1 API has its own document (/v1/docs); /docs is the app's internal API.
+    transform: ({ schema, url }) => ({ schema: url.startsWith("/v1") ? { ...schema, hide: true } : schema, url }),
     openapi: {
       openapi: "3.0.0",
       info: {
         title: "OneSystec API",
         description:
-          "API de la plataforma de rastreo de flotas OneSystec. Todos los datos quedan " +
-          "aislados por organización — un token (de login o una API key) solo puede ver " +
-          "y modificar los dispositivos, vehículos y posiciones de su propia organización.",
+          "API interna de la app OneSystec (sesión de usuario). Todos los datos quedan aislados por " +
+          "organización. Para integrar otras apps usá la API pública de solo lectura: /v1/docs.",
         version: "1.0.0",
       },
       servers: [{ url: env.PUBLIC_API_URL, description: "API" }],
@@ -61,13 +63,6 @@ export async function buildApp() {
             bearerFormat: "JWT",
             description: "Token obtenido en /auth/login o /auth/register. Para la app web.",
           },
-          apiKeyAuth: {
-            type: "http",
-            scheme: "bearer",
-            description:
-              "API key de tu organización (creada en /api-keys), en el mismo header " +
-              "Authorization: Bearer <api key>. Para integraciones de terceros.",
-          },
         },
       },
     },
@@ -83,6 +78,7 @@ export async function buildApp() {
   await app.register(geofencesRoutes);
   await app.register(productsRoutes);
   await app.register(teamUsersRoutes);
+  await app.register(publicApiRoutes, { prefix: "/v1" });
   await app.register(tollsRoutes);
   await app.register(registerRealtimeGateway);
 

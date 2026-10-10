@@ -43,6 +43,7 @@ export async function revokeApiKey(orgId: string, id: string): Promise<boolean> 
 
 export interface AuthenticatedApiKey {
   orgId: string;
+  keyId: string;
 }
 
 /** Looks up an active (non-revoked) key by its plaintext value and touches lastUsedAt.
@@ -57,7 +58,7 @@ export async function authenticateApiKey(plaintextKey: string): Promise<Authenti
   if (!record) return null;
 
   await db.update(apiKeys).set({ lastUsedAt: new Date() }).where(eq(apiKeys.id, record.id));
-  return { orgId: record.orgId };
+  return { orgId: record.orgId, keyId: record.id };
 }
 
 export function looksLikeApiKey(value: string): boolean {

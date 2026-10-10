@@ -12,3 +12,14 @@ declare module "@fastify/jwt" {
     user: JwtPayload;
   }
 }
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** OpenAPI document of the public /v1 API only (a second @fastify/swagger instance). */
+    swaggerPublic: () => unknown;
+  }
+  interface FastifyRequest {
+    /** Set only when the request authenticated with an API key (never with a login JWT). */
+    apiKeyId?: string;
+  }
+}
