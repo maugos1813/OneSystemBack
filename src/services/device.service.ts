@@ -21,15 +21,47 @@ export async function touchLastSeen(deviceId: string): Promise<void> {
   await db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, deviceId));
 }
 
-/** Claims an unclaimed device into an organization. No-op (returns undefined) if the
- * device doesn't exist or already belongs to an organization. */
+/** A real IMEI: 15 digits whose last one is the Luhn check digit — catches a mistyped digit. */
+export function isValidImei(imei: string): boolean {
+  if (!/^\d{15}$/.test(imei)) return false;
+  let sum = 0;
+  for (let i = 0; i < 15; i++) {
+    let digit = Number(imei[14 - i]);
+    if (i % 2 === 1) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+  }
+  return sum % 10 === 0;
+}
+
+/**
+ * Claims a device into an organization. An unclaimed device (one that already connected) is
+ * taken over; an IMEI never seen before is registered straight into the organization, so a tracker
+ * can be added before it has a SIM and ever connects — when it first does, it finds its row.
+ * Undefined if the device belongs to another organization (or the unknown IMEI isn't a valid one).
+ */
 export async function claimDevice(orgId: string, imei: string, model?: string): Promise<Device | undefined> {
-  const [updated] = await db
-    .update(devices)
-    .set({ orgId, status: "active", ...(model ? { model } : {}) })
-    .where(and(eq(devices.imei, imei), isNull(devices.orgId)))
+  const take = async () => {
+    const [updated] = await db
+      .update(devices)
+      .set({ orgId, status: "active", ...(model ? { model } : {}) })
+      .where(and(eq(devices.imei, imei), isNull(devices.orgId)))
+      .returning();
+    return updated;
+  };
+
+  const taken = await take();
+  if (taken || !isValidImei(imei)) return taken;
+
+  const [created] = await db
+    .insert(devices)
+    .values({ imei, orgId, status: "active", ...(model ? { model } : {}) })
+    .onConflictDoNothing({ target: devices.imei })
     .returning();
-  return updated;
+  // Lost a race with the device connecting for the first time: it exists now, unclaimed.
+  return created ?? (await take());
 }
 
 /** `allowedArea` excludes devices outside that área entirely — including any device

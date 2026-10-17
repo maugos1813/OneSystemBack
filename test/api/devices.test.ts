@@ -125,6 +125,13 @@ describe("/devices routes", () => {
     expect(mocks.claimDevice).toHaveBeenLastCalledWith("org-1", "860848088107876", undefined);
   });
 
+  it("rejects a 15-digit IMEI with a wrong check digit before touching the service", async () => {
+    const res = await app.inject({ method: "POST", url: "/devices/claim", headers: as("owner"), payload: { imei: "860848088107877" } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/IMEI inválido/);
+    expect(mocks.claimDevice).not.toHaveBeenCalled();
+  });
+
   it("is closed to API keys", async () => {
     const key = "osk_live_" + "0".repeat(48);
     for (const [method, url] of [

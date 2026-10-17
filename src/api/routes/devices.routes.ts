@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { claimDevice, getDeviceDetail, listDevicesForOrg, updateDevice } from "../../services/device.service.js";
+import { claimDevice, getDeviceDetail, isValidImei, listDevicesForOrg, updateDevice } from "../../services/device.service.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const model = z.string().trim().min(1).max(50);
@@ -62,7 +62,12 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: parsed.error.flatten() });
       }
 
-      const device = await claimDevice(request.user.orgId, parsed.data.imei, parsed.data.model);
+      const { imei, model } = parsed.data;
+      if (/^\d{15}$/.test(imei) && !isValidImei(imei)) {
+        return reply.code(400).send({ error: "IMEI inválido: revisa los 15 dígitos" });
+      }
+
+      const device = await claimDevice(request.user.orgId, imei, model);
       if (!device) {
         return reply.code(404).send({ error: "Device not found or already claimed" });
       }
