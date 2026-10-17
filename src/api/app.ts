@@ -16,6 +16,7 @@ import { positionsRoutes } from "./routes/positions.routes.js";
 import { productsRoutes } from "./routes/products.routes.js";
 import { publicApiRoutes } from "./routes/publicApi.routes.js";
 import { settingsRoutes } from "./routes/settings.routes.js";
+import { maintenanceRoutes } from "./routes/maintenance.routes.js";
 import { simsRoutes } from "./routes/sims.routes.js";
 import { teamUsersRoutes } from "./routes/teamUsers.routes.js";
 import { tollsRoutes } from "./routes/tolls.routes.js";
@@ -85,6 +86,7 @@ export async function buildApp() {
   await app.register(publicApiRoutes, { prefix: "/v1" });
   await app.register(tollsRoutes);
   await app.register(simsRoutes);
+  await app.register(maintenanceRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

@@ -10,6 +10,8 @@ import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive } from "./deviceAlarms.
 import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
 import { getOpenNotification, openNotification, resolveNotification } from "./alertNotification.service.js";
 import { type AlertPreferences, type OrgSettings, type WorkingHours, withDefaults } from "./settings.service.js";
+import { correctedKm, listPlansForOrg, maintenanceAlertMessage } from "./maintenance.service.js";
+import { computePlanStatus, trackerOdometerKm } from "./maintenanceStatus.js";
 import { listVehiclesForOrg } from "./vehicle.service.js";
 
 /** `positions.io_data` is stored as jsonb, which Drizzle infers as `unknown` — this is
@@ -109,7 +111,8 @@ function hasAnyAlertEnabled(alerts: AlertPreferences): boolean {
     alerts.speedingEnabled ||
     alerts.excessiveIdlingEnabled ||
     alerts.geofenceEnabled ||
-    alerts.deviceAlarmsEnabled
+    alerts.deviceAlarmsEnabled ||
+    alerts.maintenanceEnabled
   );
 }
 
@@ -158,15 +161,34 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
   const deviceById = new Map(devices.map((d) => [d.id, d]));
   const geofences = settings.alerts.geofenceEnabled ? await listGeofencesForOrg(orgId) : [];
 
+  const plans = settings.alerts.maintenanceEnabled ? await listPlansForOrg(orgId) : [];
+
   const collector: AlertEmailItem[] = [];
   const now = new Date();
 
   for (const vehicle of vehicles) {
-    if (!vehicle.deviceId) continue;
-    const device = deviceById.get(vehicle.deviceId);
-    if (!device) continue;
+    const device = vehicle.deviceId ? deviceById.get(vehicle.deviceId) : undefined;
+    const position = device ? await getLatestPosition(device.id) : undefined;
 
-    const position = await getLatestPosition(device.id);
+    // Before the device checks: a plan counted in months still matters for a vehicle with no tracker.
+    for (const plan of plans.filter((p) => p.vehicleId === vehicle.id)) {
+      const odometerKm = correctedKm(
+        position ? trackerOdometerKm(position.ioData as Record<string, number | string>) : null,
+        vehicle.odometerOffsetKm,
+      );
+      const status = computePlanStatus(plan, odometerKm, now);
+      await ongoingCondition(
+        orgId,
+        vehicle.id,
+        vehicle.name,
+        `maint:${plan.id.slice(0, 8)}`,
+        status.state === "soon" || status.state === "overdue",
+        maintenanceAlertMessage(vehicle.name, plan.name, status),
+        collector,
+      );
+    }
+
+    if (!device) continue;
 
     if (settings.alerts.deviceOfflineEnabled) {
       await ongoingCondition(

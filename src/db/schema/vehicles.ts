@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { integer, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { devices } from "./devices.js";
 import { organizations } from "./organizations.js";
 
@@ -14,6 +14,9 @@ export const vehicles = pgTable("vehicles", {
   // vehicles synced from Radius Velocity, which groups devices this way.
   fleetGroup: varchar("fleet_group", { length: 50 }),
   deviceId: uuid("device_id").references(() => devices.id, { onDelete: "set null" }),
+  // Added to the tracker's odometer to get the dashboard reading (a tracker counts from its
+  // own install, not from the car's real km). Set when someone calibrates it for maintenance.
+  odometerOffsetKm: integer("odometer_offset_km").notNull().default(0),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

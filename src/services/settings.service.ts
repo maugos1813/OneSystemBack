@@ -31,6 +31,8 @@ export interface AlertPreferences {
   geofenceEnabled: boolean;
   /** Tamper/impact alarms the tracker raises itself: unplug, jamming, towing, crash. */
   deviceAlarmsEnabled: boolean;
+  /** Heads-up when a service plan is close to due or overdue. */
+  maintenanceEnabled: boolean;
 }
 
 export interface OrgSettings {
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
     excessiveIdlingMinutes: 15,
     geofenceEnabled: true,
     deviceAlarmsEnabled: true,
+    maintenanceEnabled: true,
   },
 };
 
