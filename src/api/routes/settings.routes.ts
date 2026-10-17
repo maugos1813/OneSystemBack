@@ -34,6 +34,7 @@ const alertsSchema = z
     excessiveIdlingEnabled: z.boolean(),
     excessiveIdlingMinutes: z.number().min(1).max(240),
     geofenceEnabled: z.boolean(),
+    deviceAlarmsEnabled: z.boolean(),
   })
   .partial();
 

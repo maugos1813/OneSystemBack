@@ -12,4 +12,8 @@ export const AVL_ID = {
   IGNITION: 239,
   MOVEMENT: 240,
   TOTAL_ODOMETER: 16,
+  TOWING: 246,
+  CRASH: 247,
+  JAMMING: 249,
+  UNPLUG: 252,
 } as const;

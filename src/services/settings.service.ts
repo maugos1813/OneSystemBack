@@ -29,6 +29,8 @@ export interface AlertPreferences {
   excessiveIdlingEnabled: boolean;
   excessiveIdlingMinutes: number;
   geofenceEnabled: boolean;
+  /** Tamper/impact alarms the tracker raises itself: unplug, jamming, towing, crash. */
+  deviceAlarmsEnabled: boolean;
 }
 
 export interface OrgSettings {
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
     excessiveIdlingEnabled: true,
     excessiveIdlingMinutes: 15,
     geofenceEnabled: true,
+    deviceAlarmsEnabled: true,
   },
 };
 

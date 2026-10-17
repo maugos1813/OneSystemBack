@@ -1,12 +1,17 @@
-import { and, desc, eq, gte, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { deviceEvents, positions, type DeviceEvent, type Position } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { serializeIoElements } from "../tcp-server/codec8/ioSerialize.js";
 import type { AvlRecord } from "../tcp-server/codec8/types.js";
+import { DEVICE_ALARM_KEYS, DEVICE_ALARMS } from "./deviceAlarms.js";
 import { detectTollPassages } from "./tollDetection.service.js";
 
-const EVENT_AVL_IDS: ReadonlySet<number> = new Set([AVL_ID.IGNITION, AVL_ID.MOVEMENT]);
+const EVENT_AVL_IDS: ReadonlySet<number> = new Set([
+  AVL_ID.IGNITION,
+  AVL_ID.MOVEMENT,
+  ...DEVICE_ALARM_KEYS.map((key) => DEVICE_ALARMS[key].avlId),
+]);
 
 /**
  * Persists every AVL record from a decoded packet as a position row, plus a
@@ -58,14 +63,16 @@ export async function storeAvlRecords(deviceId: string, records: AvlRecord[]): P
   );
 }
 
-function eventTypeFromAvlId(avlId: number): string {
+export function eventTypeFromAvlId(avlId: number): string {
   switch (avlId) {
     case AVL_ID.IGNITION:
       return "ignition_change";
     case AVL_ID.MOVEMENT:
       return "movement_change";
-    default:
-      return `avl_${avlId}`;
+    default: {
+      const alarm = DEVICE_ALARM_KEYS.map((key) => DEVICE_ALARMS[key]).find((a) => a.avlId === avlId);
+      return alarm ? alarm.eventType : `avl_${avlId}`;
+    }
   }
 }
 
@@ -127,4 +134,16 @@ export async function getDeviceEvents({
     .where(and(...conditions))
     .orderBy(desc(deviceEvents.ts))
     .limit(Math.min(limit, 1000));
+}
+
+/** The newest event of each tracker-alarm type for a device (what decides whether the alarm
+ * is currently raised). Keyed by event type; types that never happened are absent. */
+export async function getLatestAlarmEvents(deviceId: string): Promise<Map<string, DeviceEvent>> {
+  const types = DEVICE_ALARM_KEYS.map((key) => DEVICE_ALARMS[key].eventType);
+  const rows = await db
+    .selectDistinctOn([deviceEvents.type])
+    .from(deviceEvents)
+    .where(and(eq(deviceEvents.deviceId, deviceId), inArray(deviceEvents.type, types)))
+    .orderBy(deviceEvents.type, desc(deviceEvents.ts));
+  return new Map(rows.map((row) => [row.type, row]));
 }

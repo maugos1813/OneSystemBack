@@ -13,7 +13,12 @@ export const devices = pgTable("devices", {
   // Nullable until a user claims the device into their organization.
   orgId: uuid("org_id").references(() => organizations.id, { onDelete: "cascade" }),
   imei: varchar("imei", { length: 20 }).notNull().unique(),
+  // Teltonika never says which model it is in the AVL stream, so this is set by a person
+  // (when claiming, or later from the device sheet) and defaults to the first model we deployed.
   model: varchar("model", { length: 50 }).notNull().default("FMB204"),
+  /** The S/N printed on the label (not the IMEI). */
+  serialNumber: varchar("serial_number", { length: 32 }),
+  firmware: varchar("firmware", { length: 32 }),
   status: deviceStatusEnum("status").notNull().default("unclaimed"),
   source: deviceSourceEnum("source").notNull().default("teltonika"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),

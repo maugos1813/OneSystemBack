@@ -5,7 +5,8 @@ import { organizations, users, type Device, type Geofence, type Position, type V
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { listGeofencesForOrg } from "./geofence.service.js";
 import { listDevicesForOrg } from "./device.service.js";
-import { getLatestPosition } from "./position.service.js";
+import { getLatestAlarmEvents, getLatestPosition } from "./position.service.js";
+import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive } from "./deviceAlarms.js";
 import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
 import { getOpenNotification, openNotification, resolveNotification } from "./alertNotification.service.js";
 import { type AlertPreferences, type OrgSettings, type WorkingHours, withDefaults } from "./settings.service.js";
@@ -107,7 +108,8 @@ function hasAnyAlertEnabled(alerts: AlertPreferences): boolean {
     alerts.lowBatteryEnabled ||
     alerts.speedingEnabled ||
     alerts.excessiveIdlingEnabled ||
-    alerts.geofenceEnabled
+    alerts.geofenceEnabled ||
+    alerts.deviceAlarmsEnabled
   );
 }
 
@@ -188,6 +190,23 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         `${vehicle.name} tiene voltaje de batería bajo`,
         collector,
       );
+    }
+
+    if (settings.alerts.deviceAlarmsEnabled) {
+      const latest = await getLatestAlarmEvents(device.id);
+      for (const key of DEVICE_ALARM_KEYS) {
+        const alarm = DEVICE_ALARMS[key];
+        const event = latest.get(alarm.eventType);
+        await ongoingCondition(
+          orgId,
+          vehicle.id,
+          vehicle.name,
+          key,
+          !!event && isAlarmActive(event.payload, alarm.avlId, event.ts, now),
+          alarm.alert(vehicle.name),
+          collector,
+        );
+      }
     }
 
     if (settings.alerts.speedingEnabled) {
