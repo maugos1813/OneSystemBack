@@ -17,7 +17,7 @@ vi.mock("../../src/db/client.js", async () => {
 });
 
 vi.mock("../../src/services/position.service.js", () => ({
-  getLatestPosition: async () => (harness.hasPosition ? { ioData: harness.ioData } : undefined),
+  getLatestReading: async () => (harness.hasPosition ? { ioData: harness.ioData } : undefined),
 }));
 
 const clientModule = (await import("../../src/db/client.js")) as unknown as { db: ReturnType<typeof drizzle>; __pg: PGlite };

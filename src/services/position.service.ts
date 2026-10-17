@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { deviceEvents, positions, type DeviceEvent, type Position } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
@@ -54,7 +54,7 @@ export async function storeAvlRecords(deviceId: string, records: AvlRecord[]): P
   // Not awaited: the device's ack must not wait on toll detection (which never throws).
   void detectTollPassages(
     deviceId,
-    records.map((record) => ({
+    records.filter((record) => hasFix({ lat: record.gps.latitude, lng: record.gps.longitude })).map((record) => ({
       lat: record.gps.latitude,
       lng: record.gps.longitude,
       ts: record.timestamp,
@@ -76,7 +76,24 @@ export function eventTypeFromAvlId(avlId: number): string {
   }
 }
 
-export async function getLatestPosition(deviceId: string): Promise<Position | undefined> {
+/**
+ * A report with a GPS fix. A tracker that has no fix (indoors, just powered on) still reports,
+ * with latitude and longitude 0/0 — a point in the Gulf of Guinea that must never be shown,
+ * drawn or measured. Those reports are still stored: they carry voltage, signal and alarms.
+ */
+export function hasFix(position: { lat: number; lng: number }): boolean {
+  return position.lat !== 0 || position.lng !== 0;
+}
+
+const WITH_FIX = sql`(${positions.lat} <> 0 or ${positions.lng} <> 0)`;
+
+/** How far back the last known location is looked up when the newest report has no fix. Kept to
+ * the uncompressed part of the table so a device that never gets a fix cannot make every poll
+ * scan its whole history. */
+const LAST_FIX_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** The newest report as it is, fix or not — for what it carries besides the location (IO data). */
+export async function getLatestReading(deviceId: string): Promise<Position | undefined> {
   const [row] = await db
     .select()
     .from(positions)
@@ -84,6 +101,31 @@ export async function getLatestPosition(deviceId: string): Promise<Position | un
     .orderBy(desc(positions.ts))
     .limit(1);
   return row;
+}
+
+/**
+ * The latest position of a device: the newest report, with the last known location filled in
+ * when that report has no fix (what trackers do themselves). Undefined when the device has no
+ * location to show at all — it has never had a fix, or not within the last 7 days.
+ */
+export async function getLatestPosition(deviceId: string): Promise<Position | undefined> {
+  const newest = await getLatestReading(deviceId);
+  if (!newest || hasFix(newest)) return newest;
+
+  const [lastFix] = await db
+    .select()
+    .from(positions)
+    .where(
+      and(
+        eq(positions.deviceId, deviceId),
+        WITH_FIX,
+        gte(positions.ts, new Date(newest.ts.getTime() - LAST_FIX_LOOKBACK_MS)),
+      ),
+    )
+    .orderBy(desc(positions.ts))
+    .limit(1);
+  if (!lastFix) return undefined;
+  return { ...newest, lat: lastFix.lat, lng: lastFix.lng, altitude: lastFix.altitude, angle: lastFix.angle };
 }
 
 export interface PositionHistoryQuery {
@@ -99,7 +141,7 @@ export async function getPositionHistory({
   to,
   limit = 500,
 }: PositionHistoryQuery): Promise<Position[]> {
-  const conditions = [eq(positions.deviceId, deviceId)];
+  const conditions = [eq(positions.deviceId, deviceId), WITH_FIX];
   if (from) conditions.push(gte(positions.ts, from));
   if (to) conditions.push(lte(positions.ts, to));
 

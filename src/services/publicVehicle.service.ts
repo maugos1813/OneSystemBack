@@ -98,10 +98,17 @@ export async function listPublicVehicles(
   orgId: string,
   { vehicleId, allowedArea }: { vehicleId?: string; allowedArea?: string | null } = {},
 ): Promise<PublicVehicle[]> {
+  // The newest report, with the last known location (7 days back at most) filled in when that
+  // report has no GPS fix; a vehicle that has no location at all comes out with no position.
   const { rows } = await db.execute<VehicleRow>(sql`
     select v.id, v.name, v.plate, v.fleet_group,
-           p.ts as p_ts, p.lat as p_lat, p.lng as p_lng, p.speed as p_speed, p.angle as p_angle,
-           p.altitude as p_altitude, p.satellites as p_satellites, p.io_data as p_io_data
+           case when n.ts is null or (n.lat = 0 and n.lng = 0 and f.ts is null) then null else n.ts end as p_ts,
+           case when n.lat = 0 and n.lng = 0 then f.lat else n.lat end as p_lat,
+           case when n.lat = 0 and n.lng = 0 then f.lng else n.lng end as p_lng,
+           n.speed as p_speed,
+           case when n.lat = 0 and n.lng = 0 then f.angle else n.angle end as p_angle,
+           case when n.lat = 0 and n.lng = 0 then f.altitude else n.altitude end as p_altitude,
+           n.satellites as p_satellites, n.io_data as p_io_data
     from vehicles v
     left join lateral (
       select ts, lat, lng, speed, angle, altitude, satellites, io_data
@@ -109,7 +116,15 @@ export async function listPublicVehicles(
       where device_id = v.device_id
       order by ts desc
       limit 1
-    ) p on true
+    ) n on true
+    left join lateral (
+      select ts, lat, lng, angle, altitude
+      from positions
+      where device_id = v.device_id and (lat <> 0 or lng <> 0)
+        and ts >= n.ts - interval '7 days' and ts <= n.ts
+      order by ts desc
+      limit 1
+    ) f on (n.lat = 0 and n.lng = 0)
     where v.org_id = ${orgId}
       ${vehicleId ? sql`and v.id = ${vehicleId}` : sql``}
       ${allowedArea ? sql`and v.fleet_group = ${allowedArea}` : sql``}

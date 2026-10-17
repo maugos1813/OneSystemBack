@@ -5,7 +5,7 @@ import { organizations, users, type Device, type Geofence, type Position, type V
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { listGeofencesForOrg } from "./geofence.service.js";
 import { listDevicesForOrg } from "./device.service.js";
-import { getLatestAlarmEvents, getLatestPosition } from "./position.service.js";
+import { getLatestAlarmEvents, getLatestPosition, getLatestReading } from "./position.service.js";
 import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive } from "./deviceAlarms.js";
 import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
 import { getOpenNotification, openNotification, resolveNotification } from "./alertNotification.service.js";
@@ -168,7 +168,8 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
 
   for (const vehicle of vehicles) {
     const device = vehicle.deviceId ? deviceById.get(vehicle.deviceId) : undefined;
-    const position = device ? await getLatestPosition(device.id) : undefined;
+    // With the last known location when there is one; otherwise the raw reading, which still has voltage and ignition.
+    const position = device ? ((await getLatestPosition(device.id)) ?? (await getLatestReading(device.id))) : undefined;
 
     // Before the device checks: a plan counted in months still matters for a vehicle with no tracker.
     for (const plan of plans.filter((p) => p.vehicleId === vehicle.id)) {

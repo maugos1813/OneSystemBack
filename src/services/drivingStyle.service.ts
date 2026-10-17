@@ -209,6 +209,7 @@ function pairsCte(deviceIdList: ReturnType<typeof sql.join>, from: Date, to: Dat
              lag(lat) over w as p_lat, lag(lng) over w as p_lng
       from positions
       where device_id in (${deviceIdList}) and ts >= ${from} and ts <= ${to}
+        and (lat <> 0 or lng <> 0)
       window w as (partition by device_id order by ts)
     ), t as (
       select *,

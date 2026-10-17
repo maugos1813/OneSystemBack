@@ -9,7 +9,7 @@ import {
   type Vehicle,
 } from "../db/schema/index.js";
 import { computePlanStatus, trackerOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
-import { getLatestPosition } from "./position.service.js";
+import { getLatestReading } from "./position.service.js";
 import { getVehicleForOrg, listVehiclesForOrg } from "./vehicle.service.js";
 
 export class MaintenanceError extends Error {
@@ -62,7 +62,7 @@ export function toPlanView(plan: MaintenancePlan, odometerKm: number | null, now
 /** The tracker's current odometer reading in km, or null (no device, or it reports none). */
 async function readTrackerKm(vehicle: Pick<Vehicle, "deviceId">): Promise<number | null> {
   if (!vehicle.deviceId) return null;
-  const position = await getLatestPosition(vehicle.deviceId);
+  const position = await getLatestReading(vehicle.deviceId);
   return position ? trackerOdometerKm(position.ioData as Record<string, number | string>) : null;
 }
 
