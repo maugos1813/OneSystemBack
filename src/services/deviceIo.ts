@@ -1,6 +1,6 @@
 /** Models a tracker can be registered as. Teltonika doesn't report its model over the wire,
  * so the list only drives the picker in the UI — the API accepts any short label. */
-export const DEVICE_MODELS = ["FMB204", "FMC003", "FMB920", "FMC130", "FMC150", "Otro"] as const;
+export const DEVICE_MODELS = ["FMB204", "FMC003", "FTC920", "FMB920", "FMC130", "FMC150", "Otro"] as const;
 
 export interface IoReading {
   /** AVL ID. */
