@@ -29,7 +29,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     key: "driver",
     name: "Gamonal Driver",
     type: "external",
-    url: "https://falconext-logistica-web.vercel.app/login",
+    url: "https://app-gamonal-trasporti-front.vercel.app/login",
     ssoEnabled: true,
   },
   {
