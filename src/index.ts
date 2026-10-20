@@ -6,6 +6,7 @@ import { db } from "./db/client.js";
 import { startAlertScheduler } from "./jobs/alertScheduler.js";
 import { startRadiusVelocityScheduler } from "./jobs/radiusVelocityScheduler.js";
 import { publishPosition } from "./realtime/gateway.js";
+import { dispatchPendingCommands, recordCommandResponse } from "./services/deviceCommand.service.js";
 import { findOrCreateDeviceByImei, touchLastSeen } from "./services/device.service.js";
 import { getLatestPosition, storeAvlRecords } from "./services/position.service.js";
 import { startTcpServer } from "./tcp-server/server.js";
@@ -39,6 +40,17 @@ async function main() {
         const latest = await getLatestPosition(device.id);
         if (latest) publishPosition(device.orgId, device.id, latest);
       }
+    },
+
+    // The device is connected right now and has its ACK, so a waiting lock/unlock can go out.
+    onPacketAcked: async (imei) => {
+      const device = await findOrCreateDeviceByImei(imei);
+      await dispatchPendingCommands(device).catch((err: unknown) => logger.error({ err, imei }, "dispatching device commands failed"));
+    },
+
+    onCommandResponse: async (imei, text) => {
+      const device = await findOrCreateDeviceByImei(imei);
+      await recordCommandResponse(device.id, text);
     },
 
     onDisconnect: () => {

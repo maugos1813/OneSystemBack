@@ -127,6 +127,13 @@
       "when": 1792226279197,
       "tag": "0017_maintenance",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792428559190,
+      "tag": "0018_device_commands",
+      "breakpoints": true
     }
   ]
 }

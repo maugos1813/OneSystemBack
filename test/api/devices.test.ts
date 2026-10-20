@@ -6,10 +6,16 @@ const mocks = vi.hoisted(() => ({
   getDeviceDetail: vi.fn(),
   updateDevice: vi.fn(),
 }));
+const commandMocks = vi.hoisted(() => ({ requestImmobilizer: vi.fn(), listDeviceCommands: vi.fn() }));
 
 vi.mock("../../src/services/device.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/device.service.js")>()),
   ...mocks,
+}));
+
+vi.mock("../../src/services/deviceCommand.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/deviceCommand.service.js")>()),
+  ...commandMocks,
 }));
 
 const { buildApp } = await import("../../src/api/app.js");
@@ -57,7 +63,7 @@ describe("/devices routes", () => {
   });
 
   beforeEach(() => {
-    for (const mock of Object.values(mocks)) mock.mockReset();
+    for (const mock of [...Object.values(mocks), ...Object.values(commandMocks)]) mock.mockReset();
   });
 
   it("shows the sheet with the SIM only to owner/admin accounts that see the whole fleet", async () => {
@@ -130,6 +136,45 @@ describe("/devices routes", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toMatch(/IMEI inválido/);
     expect(mocks.claimDevice).not.toHaveBeenCalled();
+  });
+
+  it("lets only owner/admin with a whole-fleet account lock or unlock a vehicle", async () => {
+    commandMocks.requestImmobilizer.mockResolvedValue({ id: "c1", status: "pending" });
+    const url = `/devices/${DEVICE_ID}/immobilizer`;
+    for (const [role, area] of [["viewer", null], ["manager", null], ["admin", "DHL"]] as const) {
+      const res = await app.inject({ method: "POST", url, headers: as(role, area), payload: { action: "lock" } });
+      expect(res.statusCode, `${role}/${area}`).toBe(403);
+    }
+    expect(commandMocks.requestImmobilizer).not.toHaveBeenCalled();
+
+    const ok = await app.inject({ method: "POST", url, headers: as("owner"), payload: { action: "lock" } });
+    expect(ok.statusCode).toBe(202);
+    expect(commandMocks.requestImmobilizer).toHaveBeenCalledWith("org-1", "u1", DEVICE_ID, "lock");
+  });
+
+  it("rejects an unknown action and relays the service's refusal (vehicle moving, model, not found)", async () => {
+    const url = `/devices/${DEVICE_ID}/immobilizer`;
+    const bad = await app.inject({ method: "POST", url, headers: as("owner"), payload: { action: "explode" } });
+    expect(bad.statusCode).toBe(400);
+
+    const { CommandError } = await import("../../src/services/deviceCommand.service.js");
+    commandMocks.requestImmobilizer.mockRejectedValue(new CommandError(409, "El vehículo está en movimiento"));
+    const moving = await app.inject({ method: "POST", url, headers: as("owner"), payload: { action: "lock" } });
+    expect(moving.statusCode).toBe(409);
+    expect(moving.json().error).toMatch(/movimiento/);
+  });
+
+  it("lists the commands only to owner/admin, and is closed to API keys", async () => {
+    commandMocks.listDeviceCommands.mockResolvedValue([{ id: "c1" }]);
+    const url = `/devices/${DEVICE_ID}/commands`;
+    expect((await app.inject({ method: "GET", url, headers: as("viewer") })).statusCode).toBe(403);
+    const ok = await app.inject({ method: "GET", url, headers: as("admin") });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual([{ id: "c1" }]);
+
+    const key = "osk_live_" + "0".repeat(48);
+    const withKey = await app.inject({ method: "POST", url: `/devices/${DEVICE_ID}/immobilizer`, headers: { authorization: `Bearer ${key}` }, payload: { action: "lock" } });
+    expect(withKey.statusCode).toBe(403);
   });
 
   it("is closed to API keys", async () => {

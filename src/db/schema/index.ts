@@ -12,3 +12,4 @@ export * from "./userProducts.js";
 export * from "./tolls.js";
 export * from "./simCards.js";
 export * from "./maintenance.js";
+export * from "./deviceCommands.js";

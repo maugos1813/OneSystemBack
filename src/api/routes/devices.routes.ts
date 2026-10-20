@@ -2,6 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { claimDevice, getDeviceDetail, isValidImei, listDevicesForOrg, updateDevice } from "../../services/device.service.js";
+import {
+  CommandError,
+  listDeviceCommands,
+  requestImmobilizer,
+} from "../../services/deviceCommand.service.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const model = z.string().trim().min(1).max(50);
@@ -23,6 +28,8 @@ const patchSchema = z.object({
   serialNumber: optionalLabel(32),
   firmware: optionalLabel(32),
 });
+
+const immobilizerSchema = z.object({ action: z.enum(["lock", "unlock"]) });
 
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -124,6 +131,56 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
       const updated = await updateDevice(request.user.orgId, params.data.id, patch);
       if (!updated) return reply.code(404).send({ error: "Device not found" });
       return updated;
+    },
+  );
+
+  app.post(
+    "/devices/:id/immobilizer",
+    {
+      preHandler: requireRole("owner", "admin"),
+      schema: {
+        tags: ["Devices"],
+        summary: "Bloquear o desbloquear el vehículo (salida del equipo)",
+        security: AUTH,
+        params: zodToJsonSchema(idParams),
+        body: zodToJsonSchema(immobilizerSchema),
+      },
+    },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      const body = immobilizerSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: body.success ? "Invalid device id" : body.error.flatten() });
+      }
+      // An account limited to one área does not get to cut vehicles.
+      if (request.user.allowedArea) return reply.code(403).send({ error: "Forbidden" });
+
+      try {
+        const command = await requestImmobilizer(request.user.orgId, request.user.userId, params.data.id, body.data.action);
+        return reply.code(202).send(command);
+      } catch (err) {
+        if (err instanceof CommandError) return reply.code(err.status).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  app.get(
+    "/devices/:id/commands",
+    {
+      preHandler: requireRole("owner", "admin"),
+      schema: {
+        tags: ["Devices"],
+        summary: "Últimas órdenes enviadas al dispositivo (bloqueos y desbloqueos)",
+        security: AUTH,
+        params: zodToJsonSchema(idParams),
+      },
+    },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      if (!params.success) return reply.code(400).send({ error: "Invalid device id" });
+      if (request.user.allowedArea) return reply.code(403).send({ error: "Forbidden" });
+      return listDeviceCommands(request.user.orgId, params.data.id);
     },
   );
 }
