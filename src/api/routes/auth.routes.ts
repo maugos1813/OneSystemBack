@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { logoSchema } from "../../services/orgLogo.js";
 import { authenticate, getCurrentUser, registerOrganizationWithOwner } from "../../services/auth.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
@@ -8,6 +9,7 @@ const registerSchema = z.object({
   orgName: z.string().min(2).max(200),
   email: z.string().email(),
   password: z.string().min(8).max(100),
+  logo: logoSchema.optional(),
 });
 
 const loginSchema = z.object({

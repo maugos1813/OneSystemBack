@@ -134,6 +134,13 @@
       "when": 1792428559190,
       "tag": "0018_device_commands",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792510242027,
+      "tag": "0019_org_logo",
+      "breakpoints": true
     }
   ]
 }

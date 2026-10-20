@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
+import { logoSchema } from "../../services/orgLogo.js";
 import { getSettings, updateSettings } from "../../services/settings.service.js";
 
 const workingHoursDaySchema = z.object({
@@ -41,6 +42,8 @@ const alertsSchema = z
 
 const updateSchema = z.object({
   orgName: z.string().min(2).max(200).optional(),
+  /** The client's logo as a data URL; null removes it. */
+  orgLogo: logoSchema.nullable().optional(),
   workingHours: workingHoursSchema.optional(),
   alerts: alertsSchema.optional(),
 });

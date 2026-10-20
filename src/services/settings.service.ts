@@ -95,6 +95,8 @@ export async function getSettings(orgId: string): Promise<OrgSettingsWithName | 
 
 export interface UpdateSettingsInput {
   orgName?: string;
+  /** A data URL to set the logo, null to remove it, undefined to leave it. */
+  orgLogo?: string | null;
   workingHours?: Partial<WorkingHours>;
   alerts?: Partial<AlertPreferences>;
 }
@@ -118,7 +120,11 @@ export async function updateSettings(
 
   const [row] = await db
     .update(organizations)
-    .set({ ...(patch.orgName ? { name: patch.orgName } : {}), settings: next })
+    .set({
+      ...(patch.orgName ? { name: patch.orgName } : {}),
+      ...(patch.orgLogo !== undefined ? { logo: patch.orgLogo } : {}),
+      settings: next,
+    })
     .where(eq(organizations.id, orgId))
     .returning({ name: organizations.name, settings: organizations.settings });
 

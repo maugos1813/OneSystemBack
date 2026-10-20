@@ -11,6 +11,8 @@ export interface CurrentUser {
   allowedArea: string | null;
   orgId: string;
   orgName: string;
+  /** The organization's logo as a data URL, or null. */
+  orgLogo: string | null;
 }
 
 export async function getCurrentUser(userId: string): Promise<CurrentUser | undefined> {
@@ -23,6 +25,7 @@ export async function getCurrentUser(userId: string): Promise<CurrentUser | unde
       allowedArea: users.allowedArea,
       orgId: organizations.id,
       orgName: organizations.name,
+      orgLogo: organizations.logo,
     })
     .from(users)
     .innerJoin(organizations, eq(users.orgId, organizations.id))
@@ -43,6 +46,7 @@ export interface RegisterOrgInput {
   orgName: string;
   email: string;
   password: string;
+  logo?: string;
 }
 
 /** Creates a brand new organization together with its first user (the "owner"). */
@@ -50,11 +54,12 @@ export async function registerOrganizationWithOwner({
   orgName,
   email,
   password,
+  logo,
 }: RegisterOrgInput): Promise<{ orgId: string; user: User }> {
   const passwordHash = await hashPassword(password);
 
   return db.transaction(async (tx) => {
-    const [org] = await tx.insert(organizations).values({ name: orgName }).returning();
+    const [org] = await tx.insert(organizations).values({ name: orgName, logo: logo ?? null }).returning();
     const [user] = await tx
       .insert(users)
       .values({ orgId: org!.id, email, passwordHash, role: "owner" })
