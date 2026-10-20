@@ -10,11 +10,13 @@ import {
   listTeamMembers,
   updateTeamMemberArea,
   updateTeamMemberEmail,
+  updateTeamMemberLogo,
   updateTeamMemberName,
   updateTeamMemberPassword,
   updateTeamMemberProducts,
   updateTeamMemberRole,
 } from "../../services/teamUser.service.js";
+import { logoSchema } from "../../services/orgLogo.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
@@ -29,6 +31,7 @@ const createMemberSchema = z.object({
   password: z.string().min(8).max(100),
   role: z.enum(["admin", "manager", "viewer"]),
   allowedArea: z.string().max(50).nullable().optional(),
+  logo: logoSchema.nullable().optional(),
   productKeys: z.array(z.string()).optional(),
 });
 
@@ -46,6 +49,10 @@ const updateProductsSchema = z.object({
 
 const updateAreaSchema = z.object({
   allowedArea: z.string().max(50).nullable(),
+});
+
+const updateLogoSchema = z.object({
+  logo: logoSchema.nullable(),
 });
 
 const updateEmailSchema = z.object({
@@ -128,6 +135,7 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
             role: "viewer",
             parentUserId: request.user.userId,
             allowedArea,
+            logo: data.logo ?? null,
             productKeys: requestedKeys,
           });
           return reply.code(201).send(member);
@@ -140,6 +148,7 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
           password: data.password,
           role: data.role,
           allowedArea: data.allowedArea ?? null,
+          logo: data.logo ?? null,
           productKeys: data.productKeys,
         });
         return reply.code(201).send(member);
@@ -176,6 +185,33 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
       const updated = await updateTeamMemberName(request.user.orgId, id, parsed.data.name);
       if (!updated) return reply.code(404).send({ error: "User not found" });
       return { id: updated.id, name: updated.name, email: updated.email, role: updated.role };
+    },
+  );
+
+  app.patch(
+    "/users/:id/logo",
+    {
+      preHandler: MANAGE_MEMBERS,
+      schema: {
+        tags: ["Team"],
+        summary: "Poner o quitar el logo de un miembro — owner/admin, o manager sobre sus propios sub-usuarios",
+        security: AUTH,
+        body: zodToJsonSchema(updateLogoSchema),
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const target = await getTeamMember(request.user.orgId, id);
+      if (!target) return reply.code(404).send({ error: "User not found" });
+      // Not self-service: the logo is the identity the admin gives a client.
+      if (!canManageOther(request.user, target)) return reply.code(403).send({ error: "Forbidden" });
+
+      const parsed = updateLogoSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      const updated = await updateTeamMemberLogo(request.user.orgId, id, parsed.data.logo);
+      if (!updated) return reply.code(404).send({ error: "User not found" });
+      return { id: updated.id, logo: updated.logo };
     },
   );
 

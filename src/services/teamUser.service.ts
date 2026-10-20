@@ -10,6 +10,8 @@ export interface TeamMember {
   role: User["role"];
   parentUserId: string | null;
   allowedArea: string | null;
+  /** The member's own logo as a data URL (a client such as DHL), or null. */
+  logo: string | null;
   createdAt: Date;
   /** Only meaningful for role "viewer"/"manager" — owner/admin always see every product the org has. */
   productKeys: string[];
@@ -39,6 +41,7 @@ function toTeamMember(member: User, productKeys: string[]): TeamMember {
     role: member.role,
     parentUserId: member.parentUserId,
     allowedArea: member.allowedArea,
+    logo: member.logo,
     createdAt: member.createdAt,
     productKeys,
   };
@@ -88,6 +91,8 @@ export interface CreateTeamMemberInput {
   parentUserId?: string | null;
   /** Hard área restriction (e.g. "DHL"/"UNIVEX"), or null/undefined for unrestricted. */
   allowedArea?: string | null;
+  /** The member's own logo as a data URL, or null/undefined for none. */
+  logo?: string | null;
   /** Products to grant. Defaults to everything the org currently has (only meaningful
    * for role "viewer"/"manager" — owner/admin ignore this and always see everything). */
   productKeys?: string[];
@@ -108,6 +113,7 @@ export async function createTeamMember(input: CreateTeamMemberInput): Promise<Te
         role: input.role,
         parentUserId: input.parentUserId ?? null,
         allowedArea: input.allowedArea ?? null,
+        logo: input.logo ?? null,
       })
       .returning();
 
@@ -168,6 +174,15 @@ export async function updateTeamMemberArea(
   const [updated] = await db
     .update(users)
     .set({ allowedArea })
+    .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
+    .returning();
+  return updated;
+}
+
+export async function updateTeamMemberLogo(orgId: string, userId: string, logo: string | null): Promise<User | undefined> {
+  const [updated] = await db
+    .update(users)
+    .set({ logo })
     .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
     .returning();
   return updated;

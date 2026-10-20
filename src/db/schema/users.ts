@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgEnum, pgTable, timestamp, uuid, varchar, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, uuid, varchar, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.js";
 
 // "manager": a delegated sub-admin — can invite/edit/remove only the sub-users it
@@ -23,6 +23,9 @@ export const users = pgTable("users", {
   // vehicles.fleetGroup) — enforced server-side on every vehicle/device/position read,
   // not just a UI default. Null means unrestricted (sees every área the org has).
   allowedArea: varchar("allowed_area", { length: 50 }),
+  /** The logo of the client this user represents (e.g. DHL), as a data URL — see orgLogo.ts. When set it
+   * replaces the organization's logo in this user's top bar. Assigned by the admin, not self-service. */
+  logo: text("logo"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -13,6 +13,8 @@ export interface CurrentUser {
   orgName: string;
   /** The organization's logo as a data URL, or null. */
   orgLogo: string | null;
+  /** This user's own logo (a client such as DHL), or null; when set it takes the place of the organization's. */
+  userLogo: string | null;
 }
 
 export async function getCurrentUser(userId: string): Promise<CurrentUser | undefined> {
@@ -26,6 +28,7 @@ export async function getCurrentUser(userId: string): Promise<CurrentUser | unde
       orgId: organizations.id,
       orgName: organizations.name,
       orgLogo: organizations.logo,
+      userLogo: users.logo,
     })
     .from(users)
     .innerJoin(organizations, eq(users.orgId, organizations.id))
