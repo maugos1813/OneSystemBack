@@ -33,7 +33,7 @@ beforeAll(async () => {
     CREATE TABLE users (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL DEFAULT '',
       email varchar(255) NOT NULL UNIQUE, password_hash varchar(255) NOT NULL, role user_role NOT NULL DEFAULT 'viewer',
-      parent_user_id uuid, allowed_area varchar(50), logo text, created_at timestamptz NOT NULL DEFAULT now()
+      parent_user_id uuid, allowed_area varchar(50), logo text, modules text[], created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE user_products (user_id uuid NOT NULL, product_key varchar(50) NOT NULL);
     CREATE TABLE organization_products (org_id uuid NOT NULL, product_key varchar(50) NOT NULL);

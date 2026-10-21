@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { listTollMonths, listTollPassages, setTollPassageFlagged } from "../../services/toll.service.js";
-import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireModule, requireRole } from "../middlewares/auth.middleware.js";
 
 const DEFAULT_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -37,6 +37,7 @@ const MANAGE_TOLLS = requireRole("owner", "admin");
 
 export async function tollsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
+  app.addHook("preHandler", requireModule("peajes"));
 
   app.get(
     "/tolls/months",

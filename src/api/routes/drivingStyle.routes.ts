@@ -7,7 +7,7 @@ import {
   getVehicleIncidents,
 } from "../../services/drivingStyle.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
-import { requireAuth } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireModule } from "../middlewares/auth.middleware.js";
 
 /** Feeds the app's Conducción page. Same calculation as the public /v1 API (one
  * implementation), but behind the user's login so the área restriction applies. */
@@ -37,6 +37,7 @@ const queryDoc = {
 
 export async function drivingStyleRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
+  app.addHook("preHandler", requireModule("conduccion", "cockpit"));
 
   app.get(
     "/driving-style",

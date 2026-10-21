@@ -11,12 +11,15 @@ import {
   updateTeamMemberArea,
   updateTeamMemberEmail,
   updateTeamMemberLogo,
+  updateTeamMemberModules,
   updateTeamMemberName,
   updateTeamMemberPassword,
   updateTeamMemberProducts,
   updateTeamMemberRole,
 } from "../../services/teamUser.service.js";
+import { MODULE_KEYS } from "../../services/modules.js";
 import { logoSchema } from "../../services/orgLogo.js";
+import { getUserModules } from "../../services/userModules.service.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
@@ -32,6 +35,7 @@ const createMemberSchema = z.object({
   role: z.enum(["admin", "manager", "viewer"]),
   allowedArea: z.string().max(50).nullable().optional(),
   logo: logoSchema.nullable().optional(),
+  modules: z.array(z.enum(MODULE_KEYS)).optional(),
   productKeys: z.array(z.string()).optional(),
 });
 
@@ -49,6 +53,10 @@ const updateProductsSchema = z.object({
 
 const updateAreaSchema = z.object({
   allowedArea: z.string().max(50).nullable(),
+});
+
+const updateModulesSchema = z.object({
+  modules: z.array(z.enum(MODULE_KEYS)),
 });
 
 const updateLogoSchema = z.object({
@@ -127,6 +135,11 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
             return reply.code(400).send({ error: "Can't grant a product you don't have yourself" });
           }
 
+          const ownModules = await getUserModules(request.user.userId);
+          if (data.modules && !data.modules.every((m) => ownModules.includes(m))) {
+            return reply.code(400).send({ error: "Can't grant a section you don't have yourself" });
+          }
+
           const member = await createTeamMember({
             orgId: request.user.orgId,
             name: data.name,
@@ -136,6 +149,7 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
             parentUserId: request.user.userId,
             allowedArea,
             logo: data.logo ?? null,
+            modules: data.modules ?? ownModules,
             productKeys: requestedKeys,
           });
           return reply.code(201).send(member);
@@ -149,6 +163,7 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
           role: data.role,
           allowedArea: data.allowedArea ?? null,
           logo: data.logo ?? null,
+          modules: data.modules,
           productKeys: data.productKeys,
         });
         return reply.code(201).send(member);
@@ -212,6 +227,39 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
       const updated = await updateTeamMemberLogo(request.user.orgId, id, parsed.data.logo);
       if (!updated) return reply.code(404).send({ error: "User not found" });
       return { id: updated.id, logo: updated.logo };
+    },
+  );
+
+  app.patch(
+    "/users/:id/modules",
+    {
+      preHandler: MANAGE_MEMBERS,
+      schema: {
+        tags: ["Team"],
+        summary: "Elegir qué secciones de OneTrack ve un miembro — owner/admin, o manager sobre sus propios sub-usuarios",
+        security: AUTH,
+        body: zodToJsonSchema(updateModulesSchema),
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const target = await getTeamMember(request.user.orgId, id);
+      if (!target) return reply.code(404).send({ error: "User not found" });
+      if (!canManageOther(request.user, target)) return reply.code(403).send({ error: "Forbidden" });
+
+      const parsed = updateModulesSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      if (request.user.role === "manager") {
+        const ownModules = await getUserModules(request.user.userId);
+        if (!parsed.data.modules.every((m) => ownModules.includes(m))) {
+          return reply.code(400).send({ error: "Can't grant a section you don't have yourself" });
+        }
+      }
+
+      const updated = await updateTeamMemberModules(request.user.orgId, id, parsed.data.modules);
+      if (!updated) return reply.code(404).send({ error: "User not found" });
+      return { id: updated.id, modules: updated.modules ?? [] };
     },
   );
 

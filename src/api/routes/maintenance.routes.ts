@@ -10,7 +10,7 @@ import {
   registerService,
   updatePlan,
 } from "../../services/maintenance.service.js";
-import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireModule, requireRole } from "../middlewares/auth.middleware.js";
 
 /**
  * Service plans of the fleet (oil, tyres, inspection…): everyone who can see a vehicle sees its
@@ -61,6 +61,7 @@ function defined<T extends Record<string, unknown>>(value: T): Partial<T> {
 
 export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
+  app.addHook("preHandler", requireModule("mantenimiento"));
 
   app.get(
     "/maintenance",

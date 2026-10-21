@@ -1,5 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { authenticateApiKey, looksLikeApiKey } from "../../services/apiKey.service.js";
+import type { ModuleKey } from "../../services/modules.js";
+import { getUserModules } from "../../services/userModules.service.js";
 
 // Vehicle-data reads that existing integrations already call with an API key before /v1
 // existed. Read-only and deprecated: new integrations should use /v1, and this list should
@@ -65,6 +67,22 @@ export function requireRole(...roles: Array<"owner" | "admin" | "manager" | "vie
     if (!roles.includes(request.user.role)) {
       await reply.code(403).send({ error: "Forbidden" });
       return;
+    }
+  };
+}
+
+/**
+ * Lets the request through only if the user has at least one of these OneTrack sections. Owner and admin always
+ * do, and API keys are governed by their own rules (they never reach these routes except the legacy reads).
+ * Checked against the database on every request: an admin taking a section away takes effect immediately.
+ */
+export function requireModule(...modules: ModuleKey[]) {
+  return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    if (request.apiKeyId) return;
+    if (request.user.role === "owner" || request.user.role === "admin") return;
+    const granted = await getUserModules(request.user.userId);
+    if (!modules.some((module) => granted.includes(module))) {
+      await reply.code(403).send({ error: "Esta sección no está habilitada para tu cuenta" });
     }
   };
 }

@@ -2,6 +2,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizationProducts, userProducts, users, type User } from "../db/schema/index.js";
 import { hashPassword } from "./auth.service.js";
+import { DEFAULT_MODULES, resolveModules, sanitizeModules, type ModuleKey } from "./modules.js";
 
 export interface TeamMember {
   id: string;
@@ -12,6 +13,8 @@ export interface TeamMember {
   allowedArea: string | null;
   /** The member's own logo as a data URL (a client such as DHL), or null. */
   logo: string | null;
+  /** The OneTrack sections the member may use (everything for owner/admin). */
+  modules: ModuleKey[];
   createdAt: Date;
   /** Only meaningful for role "viewer"/"manager" — owner/admin always see every product the org has. */
   productKeys: string[];
@@ -42,6 +45,7 @@ function toTeamMember(member: User, productKeys: string[]): TeamMember {
     parentUserId: member.parentUserId,
     allowedArea: member.allowedArea,
     logo: member.logo,
+    modules: resolveModules(member.role, member.modules),
     createdAt: member.createdAt,
     productKeys,
   };
@@ -93,6 +97,8 @@ export interface CreateTeamMemberInput {
   allowedArea?: string | null;
   /** The member's own logo as a data URL, or null/undefined for none. */
   logo?: string | null;
+  /** OneTrack sections to grant; defaults to the standard package. Owner/admin ignore it. */
+  modules?: readonly string[];
   /** Products to grant. Defaults to everything the org currently has (only meaningful
    * for role "viewer"/"manager" — owner/admin ignore this and always see everything). */
   productKeys?: string[];
@@ -114,6 +120,7 @@ export async function createTeamMember(input: CreateTeamMemberInput): Promise<Te
         parentUserId: input.parentUserId ?? null,
         allowedArea: input.allowedArea ?? null,
         logo: input.logo ?? null,
+        modules: sanitizeModules(input.modules ?? DEFAULT_MODULES),
       })
       .returning();
 
@@ -183,6 +190,19 @@ export async function updateTeamMemberLogo(orgId: string, userId: string, logo: 
   const [updated] = await db
     .update(users)
     .set({ logo })
+    .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
+    .returning();
+  return updated;
+}
+
+export async function updateTeamMemberModules(
+  orgId: string,
+  userId: string,
+  modules: readonly string[],
+): Promise<User | undefined> {
+  const [updated] = await db
+    .update(users)
+    .set({ modules: sanitizeModules(modules) })
     .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
     .returning();
   return updated;

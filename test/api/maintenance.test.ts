@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   calibrateOdometer: vi.fn(),
 }));
 
+const granted = vi.hoisted(() => ({ modules: ["mantenimiento"] as string[] }));
+vi.mock("../../src/services/userModules.service.js", () => ({ getUserModules: async () => granted.modules }));
+
 vi.mock("../../src/services/maintenance.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/maintenance.service.js")>()),
   ...mocks,
@@ -37,6 +40,19 @@ describe("/maintenance routes", () => {
   beforeEach(() => {
     for (const mock of Object.values(mocks)) mock.mockReset();
     mocks.listMaintenance.mockResolvedValue([]);
+    granted.modules = ["mantenimiento"];
+  });
+
+  it("is closed to a viewer or manager whose account doesn't include the section, and never to owner/admin", async () => {
+    granted.modules = ["mapa", "historial"];
+    for (const role of ["viewer", "manager"]) {
+      const res = await app.inject({ method: "GET", url: "/maintenance", headers: as(role) });
+      expect(res.statusCode, role).toBe(403);
+    }
+    expect(mocks.listMaintenance).not.toHaveBeenCalled();
+    for (const role of ["admin", "owner"]) {
+      expect((await app.inject({ method: "GET", url: "/maintenance", headers: as(role) })).statusCode, role).toBe(200);
+    }
   });
 
   it("everyone logged in can read, scoped to their área", async () => {

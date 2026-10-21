@@ -26,6 +26,9 @@ export const users = pgTable("users", {
   /** The logo of the client this user represents (e.g. DHL), as a data URL — see orgLogo.ts. When set it
    * replaces the organization's logo in this user's top bar. Assigned by the admin, not self-service. */
   logo: text("logo"),
+  /** The OneTrack sections this user may use (see services/modules.ts). Null until an admin chooses: they get the
+   * default package. Ignored for owner/admin, who always have everything. */
+  modules: text("modules").array(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

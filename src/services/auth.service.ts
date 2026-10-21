@@ -2,6 +2,7 @@ import argon2 from "argon2";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations, users, type User } from "../db/schema/index.js";
+import { resolveModules, type ModuleKey } from "./modules.js";
 
 export interface CurrentUser {
   userId: string;
@@ -15,6 +16,8 @@ export interface CurrentUser {
   orgLogo: string | null;
   /** This user's own logo (a client such as DHL), or null; when set it takes the place of the organization's. */
   userLogo: string | null;
+  /** The OneTrack sections this user may use (everything for owner/admin). */
+  modules: ModuleKey[];
 }
 
 export async function getCurrentUser(userId: string): Promise<CurrentUser | undefined> {
@@ -29,12 +32,15 @@ export async function getCurrentUser(userId: string): Promise<CurrentUser | unde
       orgName: organizations.name,
       orgLogo: organizations.logo,
       userLogo: users.logo,
+      storedModules: users.modules,
     })
     .from(users)
     .innerJoin(organizations, eq(users.orgId, organizations.id))
     .where(eq(users.id, userId))
     .limit(1);
-  return row;
+  if (!row) return undefined;
+  const { storedModules, ...rest } = row;
+  return { ...rest, modules: resolveModules(row.role, storedModules) };
 }
 
 export async function hashPassword(password: string): Promise<string> {

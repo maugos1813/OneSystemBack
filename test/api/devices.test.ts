@@ -66,13 +66,11 @@ describe("/devices routes", () => {
     for (const mock of [...Object.values(mocks), ...Object.values(commandMocks)]) mock.mockReset();
   });
 
-  it("shows the sheet with the SIM only to owner/admin accounts that see the whole fleet", async () => {
+  it("shows the sheet only to owner/admin, with the SIM only when they see the whole fleet", async () => {
     mocks.getDeviceDetail.mockResolvedValue({ device: { id: DEVICE_ID }, io: [] });
     const cases: Array<[string, string | null, boolean]> = [
       ["owner", null, true],
       ["admin", null, true],
-      ["manager", null, false],
-      ["viewer", null, false],
       ["admin", "DHL", false],
     ];
     for (const [role, area, includeSim] of cases) {
@@ -81,6 +79,15 @@ describe("/devices routes", () => {
       expect(res.statusCode, `${role}/${area}`).toBe(200);
       expect(mocks.getDeviceDetail).toHaveBeenCalledWith("org-1", DEVICE_ID, { allowedArea: area, includeSim });
     }
+  });
+
+  it("keeps the sheet (IMEI, firmware, raw data) away from managers and viewers", async () => {
+    mocks.getDeviceDetail.mockResolvedValue({ device: { id: DEVICE_ID }, io: [] });
+    for (const role of ["manager", "viewer"]) {
+      const res = await app.inject({ method: "GET", url: `/devices/${DEVICE_ID}`, headers: as(role) });
+      expect(res.statusCode, role).toBe(403);
+    }
+    expect(mocks.getDeviceDetail).not.toHaveBeenCalled();
   });
 
   it("answers 404 for a device that isn't visible and 400 for a malformed id", async () => {

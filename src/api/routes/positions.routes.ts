@@ -6,7 +6,7 @@ import {
   getPositionHistory,
 } from "../../services/position.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
-import { requireAuth } from "../middlewares/auth.middleware.js";
+import { requireAuth, requireModule } from "../middlewares/auth.middleware.js";
 
 const historyQuerySchema = z.object({
   from: z.coerce.date().optional(),
@@ -58,6 +58,8 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/vehicles/:id/positions",
     {
+      // The history behind Historial and Analíticas (speed trend); the live map only needs /latest.
+      preHandler: requireModule("historial", "analiticas"),
       schema: {
         tags: ["Positions"],
         summary: "Histórico de posiciones de un vehículo, por rango de fechas",

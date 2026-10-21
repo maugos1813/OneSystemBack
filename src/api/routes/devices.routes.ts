@@ -85,6 +85,8 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/devices/:id",
     {
+      // IMEI, firmware, SIM and raw data are administration, not something a client section shows.
+      preHandler: requireRole("owner", "admin"),
       schema: {
         tags: ["Devices"],
         summary: "Ficha de un dispositivo: datos, vehículo, SIM y lo que está enviando",
