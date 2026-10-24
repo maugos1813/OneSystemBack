@@ -13,6 +13,8 @@ const APP_URL = CORS_ORIGINS.find((origin) => !/localhost|127\.0\.0\.1/.test(ori
 export interface AlertEmailItem {
   vehicleName: string;
   message: string;
+  /** The flota of the vehicle the alert is about; a client only gets the alerts of their own flota. */
+  fleetGroup?: string | null;
 }
 
 function renderAlertEmailHtml(orgName: string, alerts: AlertEmailItem[]): string {

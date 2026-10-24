@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
@@ -14,7 +14,7 @@ import { detectTollPassages } from "./tollDetection.service.js";
  * Alertas, Analíticas). Radius Velocity is pull-only (no push/webhooks), so this is
  * driven by a poller — see jobs/radiusVelocityScheduler.ts.
  *
- * Only each vehicle's newest report is kept (see pruneSupersededPositions): no route history for Radius.
+ * Radius keeps only RADIUS_HISTORY_DAYS of route history (see pruneRadiusHistory), Teltonika keeps 3 months.
  *
  * Radius Velocity doesn't report satellites, external/battery voltage, or odometer —
  * those are left null/absent rather than faked as 0. Only `ioData["239"]` (ignition)
@@ -120,24 +120,19 @@ async function syncVehicle(orgId: string, deviceId: string, plate: string, fleet
   }
 }
 
-/** How far back superseded Radius reports are looked for when pruning. Kept under the 7 days after which a chunk is
- * compressed, so pruning only ever touches recent, uncompressed rows. */
-const PRUNE_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+/** Radius Velocity vehicles keep a short route history: Driver reads it from here (by plate) to work out stops and the
+ * real route of a service, which happens within days of the trip. Teltonika routes are kept 3 months (migration 0022). */
+export const RADIUS_HISTORY_DAYS = 7;
 
 /**
- * Radius Velocity vehicles keep no route history here: only their newest report is stored, because that is what the
- * live map and alerts read. Everything older than `newestTs` is deleted. Route history is kept for Teltonika only.
+ * Deletes the route history of Radius Velocity devices older than RADIUS_HISTORY_DAYS. Compression only starts after
+ * 10 days (migration 0023), so this only ever touches uncompressed rows. Returns how many rows were removed.
  */
-export async function pruneSupersededPositions(deviceId: string, newestTs: Date, now: Date = new Date()): Promise<void> {
-  await db
-    .delete(positions)
-    .where(
-      and(
-        eq(positions.deviceId, deviceId),
-        lt(positions.ts, newestTs),
-        gte(positions.ts, new Date(now.getTime() - PRUNE_WINDOW_MS)),
-      ),
-    );
+export async function pruneRadiusHistory(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - RADIUS_HISTORY_DAYS * 24 * 60 * 60 * 1000);
+  const radiusDevices = db.select({ id: devices.id }).from(devices).where(eq(devices.source, "radius_velocity"));
+  const result = await db.delete(positions).where(and(lt(positions.ts, cutoff), inArray(positions.deviceId, radiusDevices)));
+  return result.rowCount ?? 0;
 }
 
 async function syncDevicePosition(orgId: string, deviceId: string, rv: RvDevice): Promise<void> {
@@ -183,9 +178,7 @@ async function syncDevicePosition(orgId: string, deviceId: string, rv: RvDevice)
 
   await db.update(devices).set({ lastSeenAt: ts }).where(eq(devices.id, deviceId));
 
-  // Toll detection compares this report with the one before it, so it has to finish before that one is pruned.
-  await detectTollPassages(deviceId, [{ lat: rv.lat, lng: rv.lon, ts, speed: Math.round(toKmh(rv.speed, rv.speed_measure_text)) }]);
-  await pruneSupersededPositions(deviceId, ts);
+  void detectTollPassages(deviceId, [{ lat: rv.lat, lng: rv.lon, ts, speed: Math.round(toKmh(rv.speed, rv.speed_measure_text)) }]);
 
   if (inserted) publishPosition(orgId, deviceId, inserted);
 }

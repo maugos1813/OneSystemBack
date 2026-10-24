@@ -39,9 +39,9 @@ afterAll(async () => {
 });
 
 describe("the module catalog", () => {
-  it("keeps Cockpit, Conducción and Peajes out of every package, and out of the default", () => {
+  it("keeps Cockpit, Conducción, Peajes and Vencimientos out of every package, and out of the default", () => {
     for (const template of Object.values(MODULE_TEMPLATES)) {
-      for (const hidden of ["cockpit", "conduccion", "peajes"]) expect(template as readonly string[]).not.toContain(hidden);
+      for (const hidden of ["cockpit", "conduccion", "peajes", "vencimientos"]) expect(template as readonly string[]).not.toContain(hidden);
     }
     expect(DEFAULT_MODULES).toEqual(MODULE_TEMPLATES.estandar);
   });

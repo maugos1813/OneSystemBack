@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
@@ -8,7 +8,8 @@ import {
   listVehiclesForOrg,
   updateVehicle,
 } from "../../services/vehicle.service.js";
-import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
+import { getUserModules } from "../../services/userModules.service.js";
+import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -23,10 +24,21 @@ const createSchema = z.object({
 const updateSchema = createSchema.partial();
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
-// Mutating a vehicle (including reassigning its área) is left to owner/admin only — a
-// manager/viewer restricted to one área could otherwise edit a vehicle's fleetGroup to
-// pull it into their own área, or edit one outside their área if they guessed its id.
-const MANAGE_VEHICLES = requireRole("owner", "admin");
+/**
+ * Who may create, edit or delete vehicles. Owner and admin always can. A client (viewer/manager) can too, but only if
+ * the admin gave them the "vehiculos" section AND a flota: they then manage the vehicles of that flota and nothing else.
+ * The handlers below pin them to it — they cannot pick another flota or assign a device (that is the admin's job), so a
+ * client can never pull a vehicle from someone else's flota into theirs.
+ */
+async function requireVehicleWrite(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const { role, allowedArea, userId } = request.user;
+  if (role === "owner" || role === "admin") return;
+  if (allowedArea && (await getUserModules(userId)).includes("vehiculos")) return;
+  await reply.code(403).send({ error: "Forbidden" });
+}
+
+const isClient = (request: FastifyRequest) => request.user.role !== "owner" && request.user.role !== "admin";
+const ADMIN_ONLY = "Solo tu administrador puede asignar el dispositivo o cambiar la flota";
 
 export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
@@ -53,10 +65,10 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/vehicles",
     {
-      preHandler: MANAGE_VEHICLES,
+      preHandler: requireVehicleWrite,
       schema: {
         tags: ["Vehicles"],
-        summary: "Crear un vehículo (owner/admin)",
+        summary: "Crear un vehículo (owner/admin, o un cliente en su propia flota)",
         security: AUTH,
         body: zodToJsonSchema(createSchema),
       },
@@ -64,6 +76,13 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = createSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      if (isClient(request)) {
+        if (parsed.data.deviceId || (parsed.data.fleetGroup && parsed.data.fleetGroup !== request.user.allowedArea)) {
+          return reply.code(403).send({ error: ADMIN_ONLY });
+        }
+        parsed.data.fleetGroup = request.user.allowedArea;
+      }
 
       const vehicle = await createVehicle({ ...parsed.data, orgId: request.user.orgId });
       return reply.code(201).send(vehicle);
@@ -73,10 +92,10 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
   app.patch(
     "/vehicles/:id",
     {
-      preHandler: MANAGE_VEHICLES,
+      preHandler: requireVehicleWrite,
       schema: {
         tags: ["Vehicles"],
-        summary: "Editar un vehículo (nombre, patente, dispositivo asignado, área) (owner/admin)",
+        summary: "Editar un vehículo (owner/admin; un cliente solo el nombre y la patente de los suyos)",
         security: AUTH,
         body: zodToJsonSchema(updateSchema),
       },
@@ -85,6 +104,16 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
       const parsed = updateSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      if (isClient(request)) {
+        if (parsed.data.deviceId !== undefined || parsed.data.fleetGroup !== undefined) {
+          return reply.code(403).send({ error: ADMIN_ONLY });
+        }
+        // A vehicle outside their flota does not exist for them.
+        if (!(await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea))) {
+          return reply.code(404).send({ error: "Vehicle not found" });
+        }
+      }
 
       const vehicle = await updateVehicle(request.user.orgId, id, parsed.data);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
@@ -95,11 +124,14 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
   app.delete(
     "/vehicles/:id",
     {
-      preHandler: MANAGE_VEHICLES,
-      schema: { tags: ["Vehicles"], summary: "Eliminar un vehículo (owner/admin)", security: AUTH },
+      preHandler: requireVehicleWrite,
+      schema: { tags: ["Vehicles"], summary: "Eliminar un vehículo (owner/admin, o un cliente de su propia flota)", security: AUTH },
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
+      if (isClient(request) && !(await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea))) {
+        return reply.code(404).send({ error: "Vehicle not found" });
+      }
       const deleted = await deleteVehicle(request.user.orgId, id);
       if (!deleted) return reply.code(404).send({ error: "Vehicle not found" });
       return reply.code(204).send();

@@ -16,11 +16,12 @@ export const MODULE_KEYS = [
   "cockpit",
   "conduccion",
   "peajes",
+  "vencimientos",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
-/** Ready-made packages the admin can apply in one click. Cockpit, Conducción and Peajes are in none of them. */
+/** Ready-made packages the admin can apply in one click. Cockpit, Conducción, Peajes and Vencimientos are in none of them. */
 export const MODULE_TEMPLATES = {
   basico: ["mapa", "historial", "alertas"],
   estandar: ["mapa", "historial", "alertas", "analiticas", "vehiculos", "geocercas"],

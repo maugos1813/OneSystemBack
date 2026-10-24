@@ -7,7 +7,11 @@ import { listGeofencesForOrg } from "./geofence.service.js";
 import { listDevicesForOrg } from "./device.service.js";
 import { getLatestAlarmEvents, getLatestPosition, getLatestReading } from "./position.service.js";
 import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive } from "./deviceAlarms.js";
+import { alertsForRecipient, type AlertRecipient } from "./alertRecipients.js";
 import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
+import { listDocumentsForOrg } from "./vehicleDocument.service.js";
+import { documentAlertMessage, documentName, documentStatus } from "./vehicleDocuments.js";
+import { resolveModules } from "./modules.js";
 import { getOpenNotification, openNotification, resolveNotification } from "./alertNotification.service.js";
 import { type AlertPreferences, type OrgSettings, type WorkingHours, withDefaults } from "./settings.service.js";
 import { correctedKm, listPlansForOrg, maintenanceAlertMessage } from "./maintenance.service.js";
@@ -153,6 +157,24 @@ async function getOwnerEmail(orgId: string): Promise<string | undefined> {
   return row?.email;
 }
 
+/** The owner (everything) plus every client user of a flota who has the Alertas section (only their flota's). */
+async function getAlertRecipients(orgId: string): Promise<AlertRecipient[]> {
+  const recipients: AlertRecipient[] = [];
+  const owner = await getOwnerEmail(orgId);
+  if (owner) recipients.push({ email: owner, fleetGroup: null });
+  const clients = await db
+    .select({ email: users.email, role: users.role, allowedArea: users.allowedArea, modules: users.modules })
+    .from(users)
+    .where(eq(users.orgId, orgId));
+  for (const client of clients) {
+    if (client.role !== "viewer" && client.role !== "manager") continue;
+    if (!client.allowedArea || client.email === owner) continue;
+    if (!resolveModules(client.role, client.modules).includes("alertas")) continue;
+    recipients.push({ email: client.email, fleetGroup: client.allowedArea });
+  }
+  return recipients;
+}
+
 async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings): Promise<void> {
   const vehicles: Vehicle[] = await listVehiclesForOrg(orgId);
   if (vehicles.length === 0) return;
@@ -162,11 +184,22 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
   const geofences = settings.alerts.geofenceEnabled ? await listGeofencesForOrg(orgId) : [];
 
   const plans = settings.alerts.maintenanceEnabled ? await listPlansForOrg(orgId) : [];
+  const documents = settings.alerts.maintenanceEnabled ? await listDocumentsForOrg(orgId) : [];
 
   const collector: AlertEmailItem[] = [];
   const now = new Date();
 
+  // Each alert is tagged with the flota of the vehicle it is about, so it only reaches who may know about it.
+  let taggedUpTo = 0;
+  let currentFleetGroup: string | null = null;
+  const tagNew = () => {
+    for (let i = taggedUpTo; i < collector.length; i++) collector[i]!.fleetGroup = currentFleetGroup;
+    taggedUpTo = collector.length;
+  };
+
   for (const vehicle of vehicles) {
+    tagNew();
+    currentFleetGroup = vehicle.fleetGroup;
     const device = vehicle.deviceId ? deviceById.get(vehicle.deviceId) : undefined;
     // With the last known location when there is one; otherwise the raw reading, which still has voltage and ignition.
     const position = device ? ((await getLatestPosition(device.id)) ?? (await getLatestReading(device.id))) : undefined;
@@ -185,6 +218,19 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         `maint:${plan.id.slice(0, 8)}`,
         status.state === "soon" || status.state === "overdue",
         maintenanceAlertMessage(vehicle.name, plan.name, status),
+        collector,
+      );
+    }
+
+    for (const doc of documents.filter((d) => d.vehicleId === vehicle.id)) {
+      const status = documentStatus(doc.expiresOn, doc.remindDays, now);
+      await ongoingCondition(
+        orgId,
+        vehicle.id,
+        vehicle.name,
+        `doc:${doc.id.slice(0, 8)}`,
+        status.state !== "ok",
+        documentAlertMessage(vehicle.name, documentName(doc.kind, doc.label), status),
         collector,
       );
     }
@@ -296,9 +342,13 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
     }
   }
 
+  tagNew();
+
   if (collector.length > 0) {
-    const email = await getOwnerEmail(orgId);
-    if (email) await sendAlertDigest(email, orgName, collector);
+    for (const recipient of await getAlertRecipients(orgId)) {
+      const items = alertsForRecipient(collector, recipient);
+      if (items.length > 0) await sendAlertDigest(recipient.email, orgName, items);
+    }
   }
 }
 
