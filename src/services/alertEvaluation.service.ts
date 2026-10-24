@@ -8,6 +8,7 @@ import { listDevicesForOrg } from "./device.service.js";
 import { getLatestAlarmEvents, getLatestPosition, getLatestReading } from "./position.service.js";
 import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive } from "./deviceAlarms.js";
 import { alertsForRecipient, type AlertRecipient } from "./alertRecipients.js";
+import { alertPushMessage, sendPushToUsers } from "./push.service.js";
 import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
 import { listDocumentsForOrg } from "./vehicleDocument.service.js";
 import { documentAlertMessage, documentName, documentStatus } from "./vehicleDocuments.js";
@@ -147,30 +148,30 @@ async function ongoingCondition(
   }
 }
 
-async function getOwnerEmail(orgId: string): Promise<string | undefined> {
+async function getOwner(orgId: string): Promise<{ id: string; email: string } | undefined> {
   const [row] = await db
-    .select({ email: users.email })
+    .select({ id: users.id, email: users.email })
     .from(users)
     .where(eq(users.orgId, orgId))
     .orderBy(users.createdAt)
     .limit(1);
-  return row?.email;
+  return row;
 }
 
 /** The owner (everything) plus every client user of a flota who has the Alertas section (only their flota's). */
 async function getAlertRecipients(orgId: string): Promise<AlertRecipient[]> {
   const recipients: AlertRecipient[] = [];
-  const owner = await getOwnerEmail(orgId);
-  if (owner) recipients.push({ email: owner, fleetGroup: null });
+  const owner = await getOwner(orgId);
+  if (owner) recipients.push({ userId: owner.id, email: owner.email, fleetGroup: null });
   const clients = await db
-    .select({ email: users.email, role: users.role, allowedArea: users.allowedArea, modules: users.modules })
+    .select({ id: users.id, email: users.email, role: users.role, allowedArea: users.allowedArea, modules: users.modules })
     .from(users)
     .where(eq(users.orgId, orgId));
   for (const client of clients) {
     if (client.role !== "viewer" && client.role !== "manager") continue;
-    if (!client.allowedArea || client.email === owner) continue;
+    if (!client.allowedArea || client.id === owner?.id) continue;
     if (!resolveModules(client.role, client.modules).includes("alertas")) continue;
-    recipients.push({ email: client.email, fleetGroup: client.allowedArea });
+    recipients.push({ userId: client.id, email: client.email, fleetGroup: client.allowedArea });
   }
   return recipients;
 }
@@ -347,7 +348,9 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
   if (collector.length > 0) {
     for (const recipient of await getAlertRecipients(orgId)) {
       const items = alertsForRecipient(collector, recipient);
-      if (items.length > 0) await sendAlertDigest(recipient.email, orgName, items);
+      if (items.length === 0) continue;
+      await sendAlertDigest(recipient.email, orgName, items);
+      await sendPushToUsers([recipient.userId], alertPushMessage(orgName, items.map((item) => item.message)));
     }
   }
 }

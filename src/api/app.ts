@@ -17,6 +17,7 @@ import { productsRoutes } from "./routes/products.routes.js";
 import { publicApiRoutes } from "./routes/publicApi.routes.js";
 import { settingsRoutes } from "./routes/settings.routes.js";
 import { vehicleDocumentsRoutes } from "./routes/vehicleDocuments.routes.js";
+import { pushTokensRoutes } from "./routes/pushTokens.routes.js";
 import { maintenanceRoutes } from "./routes/maintenance.routes.js";
 import { simsRoutes } from "./routes/sims.routes.js";
 import { teamUsersRoutes } from "./routes/teamUsers.routes.js";
@@ -89,6 +90,7 @@ export async function buildApp() {
   await app.register(simsRoutes);
   await app.register(maintenanceRoutes);
   await app.register(vehicleDocumentsRoutes);
+  await app.register(pushTokensRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

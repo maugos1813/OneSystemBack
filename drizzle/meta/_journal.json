@@ -176,6 +176,13 @@
       "when": 1792836790705,
       "tag": "0024_vehicle_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792838398189,
+      "tag": "0025_push_tokens",
+      "breakpoints": true
     }
   ]
 }

@@ -30,6 +30,7 @@
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.3",
     "fastify": "^5.1.0",
+    "google-auth-library": "^11.3.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.13.1",
     "pino": "^9.5.0",

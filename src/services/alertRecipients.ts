@@ -1,6 +1,7 @@
 import type { AlertEmailItem } from "./email.service.js";
 
 export interface AlertRecipient {
+  userId: string;
   email: string;
   /** The flota this person is limited to, or null for the organization's owner, who gets everything. */
   fleetGroup: string | null;

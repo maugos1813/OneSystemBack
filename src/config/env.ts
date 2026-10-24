@@ -18,6 +18,9 @@ const envSchema = z.object({
   // Email alerts (Resend). Left unset, the alert scheduler still runs (so idling/geofence
   // state keeps ticking) but silently skips sending — fine for local dev.
   RESEND_API_KEY: z.string().optional(),
+  // Firebase service-account key (the whole JSON, on one line) used to send push notifications to the OneTrack app
+  // through FCM. Left unset, alerts still show in the app and go by email; only the phone notification is skipped.
+  FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   ALERT_EMAIL_FROM: z.string().default("OneSystec Alertas <onboarding@resend.dev>"),
   ALERT_EVAL_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
   // Shared secret for signing short-lived SSO tickets handed to external products

@@ -127,13 +127,13 @@ describe("who is told about an alert", () => {
   ];
 
   it("gives the owner everything, and a client only their own flota's", () => {
-    expect(alertsForRecipient(items, { email: "owner@x.it", fleetGroup: null })).toHaveLength(3);
-    expect(alertsForRecipient(items, { email: "p@x.it", fleetGroup: "PIAZZA" }).map((i) => i.vehicleName)).toEqual(["Piazza 1"]);
-    expect(alertsForRecipient(items, { email: "d@x.it", fleetGroup: "DHL" }).map((i) => i.vehicleName)).toEqual(["DHL 1"]);
+    expect(alertsForRecipient(items, { userId: "u0", email: "owner@x.it", fleetGroup: null })).toHaveLength(3);
+    expect(alertsForRecipient(items, { userId: "u1", email: "p@x.it", fleetGroup: "PIAZZA" }).map((i) => i.vehicleName)).toEqual(["Piazza 1"]);
+    expect(alertsForRecipient(items, { userId: "u2", email: "d@x.it", fleetGroup: "DHL" }).map((i) => i.vehicleName)).toEqual(["DHL 1"]);
   });
 
   it("never gives a client an alert about a vehicle with no flota, or with an untagged alert", () => {
-    expect(alertsForRecipient([{ vehicleName: "x", message: "y" }], { email: "p@x.it", fleetGroup: "PIAZZA" })).toEqual([]);
-    expect(alertsForRecipient([items[2]!], { email: "p@x.it", fleetGroup: "PIAZZA" })).toEqual([]);
+    expect(alertsForRecipient([{ vehicleName: "x", message: "y" }], { userId: "u1", email: "p@x.it", fleetGroup: "PIAZZA" })).toEqual([]);
+    expect(alertsForRecipient([items[2]!], { userId: "u1", email: "p@x.it", fleetGroup: "PIAZZA" })).toEqual([]);
   });
 });
