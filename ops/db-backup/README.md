@@ -25,7 +25,7 @@ La clave **privada** está solo en tu Mac (`~/OneSystec-backups/backup-key.txt`)
 
 | Variable | Valor |
 |---|---|
-| `DATABASE_URL` | `${{TimescaleDB.DATABASE_URL}}` (referencia al servicio de la base; red privada) |
+| `DATABASE_URL` | `${{OneSystemBack.DATABASE_URL}}` (la misma que usa el backend: referencia al servicio de la base por la red privada; el servicio de la base no define `DATABASE_URL`, solo `PG*`) |
 | `B2_ENDPOINT` | el endpoint del paso 1 |
 | `B2_REGION` | la región, p. ej. `us-west-004` |
 | `B2_BUCKET` | el nombre del bucket |
