@@ -10,6 +10,7 @@ import { registerRealtimeGateway } from "../realtime/gateway.js";
 import { apiKeysRoutes } from "./routes/apiKeys.routes.js";
 import { authRoutes } from "./routes/auth.routes.js";
 import { devicesRoutes } from "./routes/devices.routes.js";
+import { driverVehiclesRoutes } from "./routes/driverVehicles.routes.js";
 import { drivingStyleRoutes } from "./routes/drivingStyle.routes.js";
 import { geofencesRoutes } from "./routes/geofences.routes.js";
 import { positionsRoutes } from "./routes/positions.routes.js";
@@ -91,6 +92,7 @@ export async function buildApp() {
   await app.register(maintenanceRoutes);
   await app.register(vehicleDocumentsRoutes);
   await app.register(pushTokensRoutes);
+  await app.register(driverVehiclesRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

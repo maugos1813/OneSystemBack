@@ -28,6 +28,9 @@ const envSchema = z.object({
   // Must match the same env var on the receiving app. Left unset, SSO ticket
   // minting fails with a clear error but everything else still works.
   SSO_SHARED_SECRET: z.string().optional(),
+  // The backend of Gamonal Driver (its API root, ending in /api). A client's map in OneTrack also shows the Gamonal vehicles the Driver
+  // admin has switched on for the map: they are asked of the Driver as that same person (see driverVehicles.service.ts).
+  DRIVER_API_URL: z.string().url().default("https://appgamonaltrasportiback-vv19.onrender.com/api"),
   // Radius Velocity (third-party telematics) integration. Left unset, the scheduler
   // still starts but silently skips syncing — same graceful-no-op pattern as RESEND_API_KEY.
   RADIUS_VELOCITY_REFRESH_TOKEN: z.string().optional(),
