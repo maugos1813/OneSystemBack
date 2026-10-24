@@ -29,6 +29,8 @@ export const users = pgTable("users", {
   /** The OneTrack sections this user may use (see services/modules.ts). Null until an admin chooses: they get the
    * default package. Ignored for owner/admin, who always have everything. */
   modules: text("modules").array(),
+  /** The language this person sees the app, the alerts and the emails in (see services/i18n.ts). Chosen by an admin. */
+  language: varchar("language", { length: 5 }).notNull().default("es"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

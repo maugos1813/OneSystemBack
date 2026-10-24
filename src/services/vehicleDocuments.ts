@@ -1,3 +1,5 @@
+import { pick, type Language } from "./i18n.js";
+
 export const DOCUMENT_KINDS = ["seguro", "revision", "bollo", "tacografo", "otro"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
@@ -7,6 +9,14 @@ export const DOCUMENT_LABELS: Record<DocumentKind, string> = {
   bollo: "Bollo",
   tacografo: "Tacógrafo",
   otro: "Otro documento",
+};
+
+const DOCUMENT_LABELS_IT: Record<DocumentKind, string> = {
+  seguro: "Assicurazione",
+  revision: "Revisione",
+  bollo: "Bollo",
+  tacografo: "Tachigrafo",
+  otro: "Altro documento",
 };
 
 export type DocumentState = "ok" | "soon" | "overdue";
@@ -34,12 +44,20 @@ export function documentStatus(expiresOn: string, remindDays: number, today: Dat
   return { state: "ok", daysLeft };
 }
 
-export function documentName(kind: string, label: string | null): string {
-  if (kind === "otro") return label?.trim() || DOCUMENT_LABELS.otro;
-  return DOCUMENT_LABELS[kind as DocumentKind] ?? kind;
+export function documentName(kind: string, label: string | null, language: Language = "es"): string {
+  const labels = pick(language, { es: DOCUMENT_LABELS, it: DOCUMENT_LABELS_IT });
+  if (kind === "otro") return label?.trim() || labels.otro;
+  return labels[kind as DocumentKind] ?? kind;
 }
 
-export function documentAlertMessage(vehicleName: string, name: string, status: DocumentStatus): string {
+export function documentAlertMessage(vehicleName: string, name: string, status: DocumentStatus, language: Language = "es"): string {
+  if (language === "it") {
+    const days = Math.abs(status.daysLeft);
+    // "scadenza" (the date) instead of "scaduto/a": the name of the document can be masculine or feminine.
+    if (status.state === "overdue") return `${vehicleName}: ${name} — scadenza superata da ${days} ${days === 1 ? "giorno" : "giorni"}`;
+    if (status.daysLeft === 0) return `${vehicleName}: ${name} — scade oggi`;
+    return `${vehicleName}: ${name} — scade tra ${status.daysLeft} ${status.daysLeft === 1 ? "giorno" : "giorni"}`;
+  }
   if (status.state === "overdue") return `${vehicleName}: ${name} vencido hace ${Math.abs(status.daysLeft)} días`;
   if (status.daysLeft === 0) return `${vehicleName}: ${name} vence hoy`;
   return `${vehicleName}: ${name} vence en ${status.daysLeft} días`;

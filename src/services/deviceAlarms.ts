@@ -1,4 +1,5 @@
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
+import type { Language } from "./i18n.js";
 
 /**
  * The alarms a Teltonika tracker raises on its own (it decides, from its accelerometer,
@@ -10,22 +11,26 @@ export const DEVICE_ALARMS = {
   unplug: {
     avlId: AVL_ID.UNPLUG,
     eventType: "unplug_change",
-    alert: (vehicle: string) => `${vehicle}: se desconectó el dispositivo del vehículo (posible manipulación)`,
+    alert: (vehicle: string, language: Language = "es") =>
+      language === "it" ? `${vehicle}: il dispositivo è stato scollegato dal veicolo (possibile manomissione)` : `${vehicle}: se desconectó el dispositivo del vehículo (posible manipulación)`,
   },
   jamming: {
     avlId: AVL_ID.JAMMING,
     eventType: "jamming_change",
-    alert: (vehicle: string) => `${vehicle}: se detectó interferencia de señal (jamming)`,
+    alert: (vehicle: string, language: Language = "es") =>
+      language === "it" ? `${vehicle}: rilevata interferenza del segnale (jamming)` : `${vehicle}: se detectó interferencia de señal (jamming)`,
   },
   towing: {
     avlId: AVL_ID.TOWING,
     eventType: "towing_change",
-    alert: (vehicle: string) => `${vehicle}: se detectó un posible remolque`,
+    alert: (vehicle: string, language: Language = "es") =>
+      language === "it" ? `${vehicle}: rilevato un possibile traino` : `${vehicle}: se detectó un posible remolque`,
   },
   crash: {
     avlId: AVL_ID.CRASH,
     eventType: "crash_change",
-    alert: (vehicle: string) => `${vehicle}: se detectó un posible choque o impacto`,
+    alert: (vehicle: string, language: Language = "es") =>
+      language === "it" ? `${vehicle}: rilevato un possibile incidente o urto` : `${vehicle}: se detectó un posible choque o impacto`,
   },
 } as const;
 

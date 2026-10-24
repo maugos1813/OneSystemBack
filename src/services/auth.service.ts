@@ -2,6 +2,7 @@ import argon2 from "argon2";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations, users, type User } from "../db/schema/index.js";
+import { toLanguage, type Language } from "./i18n.js";
 import { resolveModules, type ModuleKey } from "./modules.js";
 
 export interface CurrentUser {
@@ -18,6 +19,8 @@ export interface CurrentUser {
   userLogo: string | null;
   /** The OneTrack sections this user may use (everything for owner/admin). */
   modules: ModuleKey[];
+  /** The language the app, the alerts and the emails are shown to this user in. */
+  language: Language;
 }
 
 export async function getCurrentUser(userId: string): Promise<CurrentUser | undefined> {
@@ -33,14 +36,15 @@ export async function getCurrentUser(userId: string): Promise<CurrentUser | unde
       orgLogo: organizations.logo,
       userLogo: users.logo,
       storedModules: users.modules,
+      storedLanguage: users.language,
     })
     .from(users)
     .innerJoin(organizations, eq(users.orgId, organizations.id))
     .where(eq(users.id, userId))
     .limit(1);
   if (!row) return undefined;
-  const { storedModules, ...rest } = row;
-  return { ...rest, modules: resolveModules(row.role, storedModules) };
+  const { storedModules, storedLanguage, ...rest } = row;
+  return { ...rest, modules: resolveModules(row.role, storedModules), language: toLanguage(storedLanguage) };
 }
 
 export async function hashPassword(password: string): Promise<string> {

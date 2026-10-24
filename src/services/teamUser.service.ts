@@ -2,6 +2,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizationProducts, userProducts, users, type User } from "../db/schema/index.js";
 import { hashPassword } from "./auth.service.js";
+import { toLanguage, type Language } from "./i18n.js";
 import { DEFAULT_MODULES, resolveModules, sanitizeModules, type ModuleKey } from "./modules.js";
 
 export interface TeamMember {
@@ -15,6 +16,8 @@ export interface TeamMember {
   logo: string | null;
   /** The OneTrack sections the member may use (everything for owner/admin). */
   modules: ModuleKey[];
+  /** The language this member sees the app, the alerts and the emails in. */
+  language: Language;
   createdAt: Date;
   /** Only meaningful for role "viewer"/"manager" — owner/admin always see every product the org has. */
   productKeys: string[];
@@ -46,6 +49,7 @@ function toTeamMember(member: User, productKeys: string[]): TeamMember {
     allowedArea: member.allowedArea,
     logo: member.logo,
     modules: resolveModules(member.role, member.modules),
+    language: toLanguage(member.language),
     createdAt: member.createdAt,
     productKeys,
   };
@@ -99,6 +103,8 @@ export interface CreateTeamMemberInput {
   logo?: string | null;
   /** OneTrack sections to grant; defaults to the standard package. Owner/admin ignore it. */
   modules?: readonly string[];
+  /** The member's language; Spanish when not given. */
+  language?: Language;
   /** Products to grant. Defaults to everything the org currently has (only meaningful
    * for role "viewer"/"manager" — owner/admin ignore this and always see everything). */
   productKeys?: string[];
@@ -121,6 +127,7 @@ export async function createTeamMember(input: CreateTeamMemberInput): Promise<Te
         allowedArea: input.allowedArea ?? null,
         logo: input.logo ?? null,
         modules: sanitizeModules(input.modules ?? DEFAULT_MODULES),
+        language: input.language ?? "es",
       })
       .returning();
 
@@ -203,6 +210,15 @@ export async function updateTeamMemberModules(
   const [updated] = await db
     .update(users)
     .set({ modules: sanitizeModules(modules) })
+    .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
+    .returning();
+  return updated;
+}
+
+export async function updateTeamMemberLanguage(orgId: string, userId: string, language: Language): Promise<User | undefined> {
+  const [updated] = await db
+    .update(users)
+    .set({ language })
     .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
     .returning();
   return updated;

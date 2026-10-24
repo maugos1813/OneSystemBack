@@ -73,6 +73,10 @@ describe("documentStatus", () => {
     expect(documentAlertMessage("Furgone", "Seguro", { state: "soon", daysLeft: 5 })).toBe("Furgone: Seguro vence en 5 días");
     expect(documentAlertMessage("Furgone", "Seguro", { state: "soon", daysLeft: 0 })).toBe("Furgone: Seguro vence hoy");
     expect(documentAlertMessage("Furgone", "Seguro", { state: "overdue", daysLeft: -3 })).toBe("Furgone: Seguro vencido hace 3 días");
+    expect(documentAlertMessage("Furgone", "Assicurazione", { state: "soon", daysLeft: 5 }, "it")).toBe("Furgone: Assicurazione — scade tra 5 giorni");
+    expect(documentAlertMessage("Furgone", "Assicurazione", { state: "soon", daysLeft: 1 }, "it")).toBe("Furgone: Assicurazione — scade tra 1 giorno");
+    expect(documentAlertMessage("Furgone", "Assicurazione", { state: "soon", daysLeft: 0 }, "it")).toBe("Furgone: Assicurazione — scade oggi");
+    expect(documentAlertMessage("Furgone", "Assicurazione", { state: "overdue", daysLeft: -3 }, "it")).toBe("Furgone: Assicurazione — scadenza superata da 3 giorni");
   });
 });
 
@@ -121,19 +125,19 @@ describe("the documents of a vehicle", () => {
 
 describe("who is told about an alert", () => {
   const items = [
-    { vehicleName: "Piazza 1", message: "a", fleetGroup: "PIAZZA" },
-    { vehicleName: "DHL 1", message: "b", fleetGroup: "DHL" },
-    { vehicleName: "Sin flota", message: "c", fleetGroup: null },
+    { vehicleName: "Piazza 1", message: { es: "a", it: "a" }, fleetGroup: "PIAZZA" },
+    { vehicleName: "DHL 1", message: { es: "b", it: "b" }, fleetGroup: "DHL" },
+    { vehicleName: "Sin flota", message: { es: "c", it: "c" }, fleetGroup: null },
   ];
 
   it("gives the owner everything, and a client only their own flota's", () => {
-    expect(alertsForRecipient(items, { userId: "u0", email: "owner@x.it", fleetGroup: null })).toHaveLength(3);
-    expect(alertsForRecipient(items, { userId: "u1", email: "p@x.it", fleetGroup: "PIAZZA" }).map((i) => i.vehicleName)).toEqual(["Piazza 1"]);
-    expect(alertsForRecipient(items, { userId: "u2", email: "d@x.it", fleetGroup: "DHL" }).map((i) => i.vehicleName)).toEqual(["DHL 1"]);
+    expect(alertsForRecipient(items, { userId: "u0", email: "owner@x.it", language: "es", fleetGroup: null })).toHaveLength(3);
+    expect(alertsForRecipient(items, { userId: "u1", email: "p@x.it", language: "it", fleetGroup: "PIAZZA" }).map((i) => i.vehicleName)).toEqual(["Piazza 1"]);
+    expect(alertsForRecipient(items, { userId: "u2", email: "d@x.it", language: "es", fleetGroup: "DHL" }).map((i) => i.vehicleName)).toEqual(["DHL 1"]);
   });
 
   it("never gives a client an alert about a vehicle with no flota, or with an untagged alert", () => {
-    expect(alertsForRecipient([{ vehicleName: "x", message: "y" }], { userId: "u1", email: "p@x.it", fleetGroup: "PIAZZA" })).toEqual([]);
-    expect(alertsForRecipient([items[2]!], { userId: "u1", email: "p@x.it", fleetGroup: "PIAZZA" })).toEqual([]);
+    expect(alertsForRecipient([{ vehicleName: "x", message: { es: "y", it: "y" } }], { userId: "u1", email: "p@x.it", language: "it", fleetGroup: "PIAZZA" })).toEqual([]);
+    expect(alertsForRecipient([items[2]!], { userId: "u1", email: "p@x.it", language: "it", fleetGroup: "PIAZZA" })).toEqual([]);
   });
 });

@@ -8,6 +8,7 @@ import {
   type MaintenanceRecord,
   type Vehicle,
 } from "../db/schema/index.js";
+import type { Language } from "./i18n.js";
 import { computePlanStatus, trackerOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
 import { getLatestReading } from "./position.service.js";
 import { getVehicleForOrg, listVehiclesForOrg } from "./vehicle.service.js";
@@ -297,14 +298,19 @@ export async function listPlansForOrg(orgId: string): Promise<MaintenancePlan[]>
 }
 
 /** What a plan's alert says, given where it stands. */
-export function maintenanceAlertMessage(vehicleName: string, planName: string, status: PlanStatus): string {
-  if (status.state === "overdue") return `${vehicleName}: mantenimiento vencido — ${planName}`;
+export function maintenanceAlertMessage(vehicleName: string, planName: string, status: PlanStatus, language: Language = "es"): string {
+  const it = language === "it";
+  if (status.state === "overdue") return `${vehicleName}: ${it ? "manutenzione scaduta" : "mantenimiento vencido"} — ${planName}`;
   const parts: string[] = [];
   if (status.kmRemaining !== null && status.state === "soon" && status.kmRemaining >= 0 && status.dueKm !== null) {
-    parts.push(`faltan ${status.kmRemaining.toLocaleString("es-AR")} km`);
+    parts.push(it ? `mancano ${status.kmRemaining.toLocaleString("it-IT")} km` : `faltan ${status.kmRemaining.toLocaleString("es-AR")} km`);
   }
   if (status.daysRemaining !== null && status.daysRemaining <= 30) {
-    parts.push(status.daysRemaining === 0 ? "vence hoy" : `faltan ${status.daysRemaining} días`);
+    parts.push(
+      status.daysRemaining === 0
+        ? it ? "scade oggi" : "vence hoy"
+        : it ? `mancano ${status.daysRemaining} giorni` : `faltan ${status.daysRemaining} días`,
+    );
   }
-  return `${vehicleName}: mantenimiento próximo — ${planName}${parts.length ? ` (${parts.join(", ")})` : ""}`;
+  return `${vehicleName}: ${it ? "manutenzione in scadenza" : "mantenimiento próximo"} — ${planName}${parts.length ? ` (${parts.join(", ")})` : ""}`;
 }

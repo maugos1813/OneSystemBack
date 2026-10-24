@@ -11,12 +11,14 @@ import {
   updateTeamMemberArea,
   updateTeamMemberEmail,
   updateTeamMemberLogo,
+  updateTeamMemberLanguage,
   updateTeamMemberModules,
   updateTeamMemberName,
   updateTeamMemberPassword,
   updateTeamMemberProducts,
   updateTeamMemberRole,
 } from "../../services/teamUser.service.js";
+import { LANGUAGES, toLanguage } from "../../services/i18n.js";
 import { MODULE_KEYS } from "../../services/modules.js";
 import { logoSchema } from "../../services/orgLogo.js";
 import { getUserModules } from "../../services/userModules.service.js";
@@ -36,6 +38,7 @@ const createMemberSchema = z.object({
   allowedArea: z.string().max(50).nullable().optional(),
   logo: logoSchema.nullable().optional(),
   modules: z.array(z.enum(MODULE_KEYS)).optional(),
+  language: z.enum(LANGUAGES).optional(),
   productKeys: z.array(z.string()).optional(),
 });
 
@@ -57,6 +60,10 @@ const updateAreaSchema = z.object({
 
 const updateModulesSchema = z.object({
   modules: z.array(z.enum(MODULE_KEYS)),
+});
+
+const updateLanguageSchema = z.object({
+  language: z.enum(LANGUAGES),
 });
 
 const updateLogoSchema = z.object({
@@ -150,6 +157,8 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
             allowedArea,
             logo: data.logo ?? null,
             modules: data.modules ?? ownModules,
+            // A sub-user reads the app in the language of the manager who created them, unless told otherwise.
+            language: data.language ?? toLanguage((await getTeamMember(request.user.orgId, request.user.userId))?.language),
             productKeys: requestedKeys,
           });
           return reply.code(201).send(member);
@@ -164,6 +173,7 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
           allowedArea: data.allowedArea ?? null,
           logo: data.logo ?? null,
           modules: data.modules,
+          language: data.language,
           productKeys: data.productKeys,
         });
         return reply.code(201).send(member);
@@ -260,6 +270,32 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
       const updated = await updateTeamMemberModules(request.user.orgId, id, parsed.data.modules);
       if (!updated) return reply.code(404).send({ error: "User not found" });
       return { id: updated.id, modules: updated.modules ?? [] };
+    },
+  );
+
+  app.patch(
+    "/users/:id/language",
+    {
+      preHandler: MANAGE_MEMBERS,
+      schema: {
+        tags: ["Team"],
+        summary: "Elegir el idioma (español/italiano) en que un miembro ve la app y recibe los avisos",
+        security: AUTH,
+        body: zodToJsonSchema(updateLanguageSchema),
+      },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const target = await getTeamMember(request.user.orgId, id);
+      if (!target) return reply.code(404).send({ error: "User not found" });
+      if (!canManageOther(request.user, target)) return reply.code(403).send({ error: "Forbidden" });
+
+      const parsed = updateLanguageSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      const updated = await updateTeamMemberLanguage(request.user.orgId, id, parsed.data.language);
+      if (!updated) return reply.code(404).send({ error: "User not found" });
+      return { id: updated.id, language: toLanguage(updated.language) };
     },
   );
 

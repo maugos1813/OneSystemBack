@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
 import { pushTokens } from "../db/schema/index.js";
+import type { Language } from "./i18n.js";
 
 export interface PushMessage {
   title: string;
@@ -115,12 +116,16 @@ export async function removeToken(userId: string, token: string): Promise<void> 
 }
 
 /** The text of the notification for a run's new alerts: how many, and the first few. */
-export function alertPushMessage(orgName: string, messages: readonly string[]): PushMessage {
+export function alertPushMessage(orgName: string, messages: readonly string[], language: Language = "es"): PushMessage {
   const shown = messages.slice(0, 3).join("\n");
   const rest = messages.length - 3;
+  const it = language === "it";
   return {
-    title: messages.length === 1 ? "OneTrack · 1 alerta nueva" : `OneTrack · ${messages.length} alertas nuevas`,
-    body: rest > 0 ? `${shown}\n+${rest} más` : shown,
+    title:
+      messages.length === 1
+        ? it ? "OneTrack · 1 nuovo avviso" : "OneTrack · 1 alerta nueva"
+        : it ? `OneTrack · ${messages.length} nuovi avvisi` : `OneTrack · ${messages.length} alertas nuevas`,
+    body: rest > 0 ? `${shown}\n+${rest} ${it ? "altri" : "más"}` : shown,
     data: { url: "/alertas", org: orgName },
   };
 }

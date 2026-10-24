@@ -3,6 +3,7 @@ import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
 import { organizations, users, type Device, type Geofence, type Position, type Vehicle } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
+import { localized, toLanguage, type Localized } from "./i18n.js";
 import { listGeofencesForOrg } from "./geofence.service.js";
 import { listDevicesForOrg } from "./device.service.js";
 import { getLatestAlarmEvents, getLatestPosition, getLatestReading } from "./position.service.js";
@@ -134,7 +135,7 @@ async function ongoingCondition(
   vehicleName: string,
   type: string,
   isActive: boolean,
-  message: string,
+  message: Localized,
   collector: AlertEmailItem[],
 ): Promise<void> {
   const open = await getOpenNotification(orgId, vehicleId, type);
@@ -148,9 +149,9 @@ async function ongoingCondition(
   }
 }
 
-async function getOwner(orgId: string): Promise<{ id: string; email: string } | undefined> {
+async function getOwner(orgId: string): Promise<{ id: string; email: string; language: string } | undefined> {
   const [row] = await db
-    .select({ id: users.id, email: users.email })
+    .select({ id: users.id, email: users.email, language: users.language })
     .from(users)
     .where(eq(users.orgId, orgId))
     .orderBy(users.createdAt)
@@ -162,16 +163,16 @@ async function getOwner(orgId: string): Promise<{ id: string; email: string } | 
 async function getAlertRecipients(orgId: string): Promise<AlertRecipient[]> {
   const recipients: AlertRecipient[] = [];
   const owner = await getOwner(orgId);
-  if (owner) recipients.push({ userId: owner.id, email: owner.email, fleetGroup: null });
+  if (owner) recipients.push({ userId: owner.id, email: owner.email, language: toLanguage(owner.language), fleetGroup: null });
   const clients = await db
-    .select({ id: users.id, email: users.email, role: users.role, allowedArea: users.allowedArea, modules: users.modules })
+    .select({ id: users.id, email: users.email, role: users.role, allowedArea: users.allowedArea, modules: users.modules, language: users.language })
     .from(users)
     .where(eq(users.orgId, orgId));
   for (const client of clients) {
     if (client.role !== "viewer" && client.role !== "manager") continue;
     if (!client.allowedArea || client.id === owner?.id) continue;
     if (!resolveModules(client.role, client.modules).includes("alertas")) continue;
-    recipients.push({ userId: client.id, email: client.email, fleetGroup: client.allowedArea });
+    recipients.push({ userId: client.id, email: client.email, language: toLanguage(client.language), fleetGroup: client.allowedArea });
   }
   return recipients;
 }
@@ -218,7 +219,7 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.name,
         `maint:${plan.id.slice(0, 8)}`,
         status.state === "soon" || status.state === "overdue",
-        maintenanceAlertMessage(vehicle.name, plan.name, status),
+        localized((lang) => maintenanceAlertMessage(vehicle.name, plan.name, status, lang)),
         collector,
       );
     }
@@ -231,7 +232,7 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.name,
         `doc:${doc.id.slice(0, 8)}`,
         status.state !== "ok",
-        documentAlertMessage(vehicle.name, documentName(doc.kind, doc.label), status),
+        localized((lang) => documentAlertMessage(vehicle.name, documentName(doc.kind, doc.label, lang), status, lang)),
         collector,
       );
     }
@@ -245,7 +246,7 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.name,
         "offline",
         isOffline(device.lastSeenAt, settings.alerts.deviceOfflineHours * 3_600_000),
-        `${vehicle.name} está desconectado`,
+        localized((lang) => (lang === "it" ? `${vehicle.name} è offline` : `${vehicle.name} está desconectado`)),
         collector,
       );
     }
@@ -257,7 +258,7 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.name,
         "low_voltage",
         isLowVoltage(position, settings.alerts.lowBatteryVoltage * 1000),
-        `${vehicle.name} tiene voltaje de batería bajo`,
+        localized((lang) => (lang === "it" ? `${vehicle.name} ha la tensione della batteria bassa` : `${vehicle.name} tiene voltaje de batería bajo`)),
         collector,
       );
     }
@@ -273,7 +274,7 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
           vehicle.name,
           key,
           !!event && isAlarmActive(event.payload, alarm.avlId, event.ts, now),
-          alarm.alert(vehicle.name),
+          localized((lang) => alarm.alert(vehicle.name, lang)),
           collector,
         );
       }
@@ -286,7 +287,13 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.name,
         "speeding",
         isSpeeding(position, settings.alerts.speedLimitKmh),
-        position ? `${vehicle.name} supera el límite de velocidad (${Math.round(position.speed)} km/h)` : "",
+        localized((lang) =>
+          position
+            ? lang === "it"
+              ? `${vehicle.name} supera il limite di velocità (${Math.round(position.speed)} km/h)`
+              : `${vehicle.name} supera el límite de velocidad (${Math.round(position.speed)} km/h)`
+            : "",
+        ),
         collector,
       );
     }
@@ -299,7 +306,7 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.name,
         "after_hours",
         inUse && isAfterHours(now, settings.workingHours),
-        `${vehicle.name} está en uso fuera del horario laboral`,
+        localized((lang) => (lang === "it" ? `${vehicle.name} è in uso fuori dall'orario di lavoro` : `${vehicle.name} está en uso fuera del horario laboral`)),
         collector,
       );
     }
@@ -320,7 +327,11 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.name,
         "excessive_idling",
         isActive,
-        `${vehicle.name} lleva motor encendido y detenido más de ${settings.alerts.excessiveIdlingMinutes} min`,
+        localized((lang) =>
+          lang === "it"
+            ? `${vehicle.name} è fermo con il motore acceso da più di ${settings.alerts.excessiveIdlingMinutes} min`
+            : `${vehicle.name} lleva motor encendido y detenido más de ${settings.alerts.excessiveIdlingMinutes} min`,
+        ),
         collector,
       );
     }
@@ -335,9 +346,15 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
 
         if (!seenBefore) continue;
         if (inside && !wasInside && gf.alertOnEnter) {
-          collector.push({ vehicleName: vehicle.name, message: `${vehicle.name} entró a "${gf.name}"` });
+          collector.push({
+            vehicleName: vehicle.name,
+            message: localized((lang) => (lang === "it" ? `${vehicle.name} è entrato in "${gf.name}"` : `${vehicle.name} entró a "${gf.name}"`)),
+          });
         } else if (!inside && wasInside && gf.alertOnExit) {
-          collector.push({ vehicleName: vehicle.name, message: `${vehicle.name} salió de "${gf.name}"` });
+          collector.push({
+            vehicleName: vehicle.name,
+            message: localized((lang) => (lang === "it" ? `${vehicle.name} è uscito da "${gf.name}"` : `${vehicle.name} salió de "${gf.name}"`)),
+          });
         }
       }
     }
@@ -349,8 +366,8 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
     for (const recipient of await getAlertRecipients(orgId)) {
       const items = alertsForRecipient(collector, recipient);
       if (items.length === 0) continue;
-      await sendAlertDigest(recipient.email, orgName, items);
-      await sendPushToUsers([recipient.userId], alertPushMessage(orgName, items.map((item) => item.message)));
+      await sendAlertDigest(recipient.email, orgName, items, recipient.language);
+      await sendPushToUsers([recipient.userId], alertPushMessage(orgName, items.map((item) => item.message[recipient.language] ?? item.message.es), recipient.language));
     }
   }
 }
