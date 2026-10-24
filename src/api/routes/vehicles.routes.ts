@@ -125,12 +125,22 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
     "/vehicles/:id",
     {
       preHandler: requireVehicleWrite,
-      schema: { tags: ["Vehicles"], summary: "Eliminar un vehículo (owner/admin, o un cliente de su propia flota)", security: AUTH },
+      schema: { tags: ["Vehicles"], summary: "Eliminar un vehículo (owner/admin, o un cliente de su propia flota; con dispositivo asignado pide ?confirmDevice=true)", security: AUTH },
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      if (isClient(request) && !(await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea))) {
-        return reply.code(404).send({ error: "Vehicle not found" });
+      if (isClient(request)) {
+        const own = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
+        if (!own) return reply.code(404).send({ error: "Vehicle not found" });
+        // Deleting a vehicle that has a device unlinks the device and takes it off the map; only the admin can link it
+        // again. So a client has to say, explicitly, that they know.
+        const confirmed = (request.query as { confirmDevice?: string }).confirmDevice === "true";
+        if (own.deviceId && !confirmed) {
+          return reply.code(409).send({
+            error: "Este vehículo tiene un dispositivo asignado. Confirma que quieres eliminarlo.",
+            code: "DEVICE_ASSIGNED",
+          });
+        }
       }
       const deleted = await deleteVehicle(request.user.orgId, id);
       if (!deleted) return reply.code(404).send({ error: "Vehicle not found" });

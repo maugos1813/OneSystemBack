@@ -89,6 +89,24 @@ describe("a client's own fleet", () => {
       expect(mocks.deleteVehicle).not.toHaveBeenCalled();
     });
 
+    it("makes a client confirm before deleting a vehicle that has a device, and only then deletes it", async () => {
+      const url = `/vehicles/${VEHICLE}`;
+      mocks.getVehicleForOrg.mockResolvedValue({ id: VEHICLE, deviceId: "dev-1" });
+      const unconfirmed = await app.inject({ method: "DELETE", url, headers: as("viewer") });
+      expect(unconfirmed.statusCode).toBe(409);
+      expect(unconfirmed.json()).toMatchObject({ code: "DEVICE_ASSIGNED" });
+      expect(mocks.deleteVehicle).not.toHaveBeenCalled();
+
+      expect((await app.inject({ method: "DELETE", url: `${url}?confirmDevice=false`, headers: as("viewer") })).statusCode).toBe(409);
+      expect((await app.inject({ method: "DELETE", url: `${url}?confirmDevice=true`, headers: as("viewer") })).statusCode).toBe(204);
+      expect(mocks.deleteVehicle).toHaveBeenCalledWith("org-1", VEHICLE);
+    });
+
+    it("deletes a client's vehicle that has no device without asking", async () => {
+      mocks.getVehicleForOrg.mockResolvedValue({ id: VEHICLE, deviceId: null });
+      expect((await app.inject({ method: "DELETE", url: `/vehicles/${VEHICLE}`, headers: as("manager") })).statusCode).toBe(204);
+    });
+
     it("keeps owner and admin as they were: any flota, any device", async () => {
       const res = await app.inject({ method: "POST", url: "/vehicles", headers: as("admin", null), payload: { name: "x", fleetGroup: "DHL", deviceId: VEHICLE } });
       expect(res.statusCode).toBe(201);
