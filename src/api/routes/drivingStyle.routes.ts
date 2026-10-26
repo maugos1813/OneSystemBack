@@ -59,6 +59,7 @@ export async function drivingStyleRoutes(app: FastifyInstance): Promise<void> {
         days: parsed.data.days,
         from: parsed.data.from,
         speedLimitKmh: parsed.data.speedLimit,
+        preferVelocity: true,
       });
       return { ...result, rules: DRIVING_RULES };
     },

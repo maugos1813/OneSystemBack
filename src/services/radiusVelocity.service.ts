@@ -70,6 +70,11 @@ async function getAccessToken(): Promise<string> {
   return refreshAccessToken();
 }
 
+/** The session this app already holds with Radius Velocity, for other calls to the same account (e.g. its driver scores). */
+export async function radiusAccessToken({ fresh = false }: { fresh?: boolean } = {}): Promise<string> {
+  return fresh ? refreshAccessToken() : getAccessToken();
+}
+
 async function fetchLivePositions(): Promise<RvDeviceGroup[]> {
   const url = `${POSITIONS_URL}?customer=${env.RADIUS_VELOCITY_CUSTOMER_ID}`;
   let token = await getAccessToken();

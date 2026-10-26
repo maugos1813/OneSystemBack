@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { listVehiclesForOrg } from "./vehicle.service.js";
+import { fetchVelocityScores, type VelocityVehicleScores } from "./velocityScores.service.js";
 
 /**
  * Driving-style scores — the single implementation behind both the public /v1 API and the
@@ -103,6 +104,8 @@ export interface VehicleDrivingStyle {
   name: string;
   plate: string | null;
   fleetGroup: string | null;
+  /** Where the numbers come from: OneTrack's own calculation on the GPS positions, or Radius Velocity's finished report. */
+  source: "onetrack" | "velocity";
   /** GPS reports analysed in the period. 0 means there is no data, not perfect driving. */
   samples: number;
   distanceKm: number;
@@ -130,7 +133,7 @@ export interface VehicleDrivingStyle {
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /** Pure: raw aggregate numbers -> what the API returns for one vehicle. */
-export function summarize(stats: RawStats | undefined): Omit<VehicleDrivingStyle, "vehicleId" | "name" | "plate" | "fleetGroup"> {
+export function summarize(stats: RawStats | undefined): Omit<VehicleDrivingStyle, "vehicleId" | "name" | "plate" | "fleetGroup" | "source"> {
   const noIncidents = { harshBraking: 0, harshAcceleration: 0, harshCornering: 0, speeding: 0 };
   if (!stats || stats.samples === 0) {
     return { samples: 0, distanceKm: 0, drivingHours: 0, trips: 0, quality: "no_data", scores: null, incidents: noIncidents, incidentsPer100Km: null };
@@ -325,6 +328,8 @@ export interface DrivingStyleQuery {
   /** End of the window (only with `from`); omitted = now. The caller has already validated it. */
   to?: Date;
   speedLimitKmh: number;
+  /** Use Radius Velocity's own scores for the vehicles it tracks (the app's Conducción page); the public API keeps OneTrack's calculation. */
+  preferVelocity?: boolean;
 }
 
 export interface DrivingStyleResult {
@@ -339,6 +344,41 @@ export interface DrivingStyleResult {
 /** A stretch that ended long ago can't change (barring late-arriving buffered reports). */
 const CLOSED_WINDOW_AFTER_MS = 10 * 60_000;
 const CLOSED_WINDOW_CACHE_TTL_MS = 60 * 60_000;
+
+/**
+ * Pure: swaps in Velocity's own numbers for the vehicles it reports on (matched by plate). The rest keep OneTrack's calculation. The
+ * counts per place and time of each incident are not part of Velocity's report, so `incidentsPer100Km` is null for these.
+ */
+export function applyVelocityScores(vehicles: VehicleDrivingStyle[], velocity: Map<string, VelocityVehicleScores>): VehicleDrivingStyle[] {
+  return vehicles.map((v) => {
+    const plate = (v.plate ?? "").replace(/\s+/g, "").toUpperCase();
+    const own = plate ? velocity.get(plate) : undefined;
+    if (!own) return v;
+    return {
+      ...v,
+      source: "velocity",
+      distanceKm: round1(own.distanceKm),
+      drivingHours: round1(own.drivingHours),
+      trips: own.trips,
+      quality: "full",
+      scores: {
+        overall: own.overall,
+        harshBraking: own.braking,
+        harshAcceleration: own.acceleration,
+        harshCornering: own.cornering,
+        speeding: own.speeding,
+        grade: scoreGrade(own.overall),
+      },
+      incidents: {
+        harshBraking: own.events.braking,
+        harshAcceleration: own.events.acceleration,
+        harshCornering: own.events.cornering,
+        speeding: own.events.speeding,
+      },
+      incidentsPer100Km: null,
+    };
+  });
+}
 
 export async function getDrivingStyle(query: DrivingStyleQuery): Promise<DrivingStyleResult> {
   const exactWindow = query.from !== undefined && query.to !== undefined;
@@ -355,8 +395,14 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
   // Exact windows are keyed by both ends; `days`/since-midnight requests keep their original key.
   const windowKey = exactWindow ? `${from.toISOString()}..${to.toISOString()}` : (query.from?.toISOString() ?? query.days);
   const cacheKey = `${query.orgId}|${query.allowedArea ?? ""}|${query.vehicleId ?? "*"}|${windowKey}|${query.speedLimitKmh}`;
+  const withVelocity = async (own: VehicleDrivingStyle[]): Promise<VehicleDrivingStyle[]> => {
+    if (!query.preferVelocity) return own;
+    const velocity = await fetchVelocityScores(from, to);
+    return velocity && velocity.size > 0 ? applyVelocityScores(own, velocity) : own;
+  };
+
   const cached = cache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return result(cached.value);
+  if (cached && cached.expiresAt > Date.now()) return result(await withVelocity(cached.value));
 
   const fleet = (await listVehiclesForOrg(query.orgId, query.allowedArea)).filter(
     (v) => !query.vehicleId || v.id === query.vehicleId,
@@ -369,13 +415,14 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
     name: v.name,
     plate: v.plate,
     fleetGroup: v.fleetGroup,
+    source: "onetrack" as const,
     ...summarize(v.deviceId ? statsByDevice.get(v.deviceId) : undefined),
   }));
 
   const closed = exactWindow && Date.now() - to.getTime() > CLOSED_WINDOW_AFTER_MS;
   if (cache.size >= CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value!); // oldest first
   cache.set(cacheKey, { expiresAt: Date.now() + (closed ? CLOSED_WINDOW_CACHE_TTL_MS : CACHE_TTL_MS), value: vehicles });
-  return result(vehicles);
+  return result(await withVelocity(vehicles));
 }
 
 export type IncidentType = "harshBraking" | "harshAcceleration" | "harshCornering" | "speeding";
