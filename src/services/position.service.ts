@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { deviceEvents, positions, type DeviceEvent, type Position } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
@@ -133,6 +133,27 @@ export interface PositionHistoryQuery {
   from?: Date;
   to?: Date;
   limit?: number;
+  /** Spreads at most this many points over the whole range (oldest to newest) instead of cutting it at the newest `limit`. */
+  maxPoints?: number;
+}
+
+/**
+ * The timestamps to keep so a long range fits `maxPoints`: the range is cut into runs of equal length and the fastest report of each
+ * run stays (the first and last one always do), so the route keeps its shape and no speeding peak disappears with the thinning.
+ */
+export function thinningKeep(rows: Array<{ ts: Date; speed: number }>, maxPoints: number): Date[] {
+  if (rows.length <= maxPoints) return rows.map((row) => row.ts);
+  const run = Math.ceil(rows.length / maxPoints);
+  const keep: Date[] = [];
+  for (let start = 0; start < rows.length; start += run) {
+    let best = rows[start]!;
+    for (const row of rows.slice(start, start + run)) if (row.speed > best.speed) best = row;
+    keep.push(best.ts);
+  }
+  // The route starts and ends where the vehicle did, not at the fastest point of its first and last run.
+  keep[0] = rows[0]!.ts;
+  keep[keep.length - 1] = rows[rows.length - 1]!.ts;
+  return keep;
 }
 
 export async function getPositionHistory({
@@ -140,10 +161,26 @@ export async function getPositionHistory({
   from,
   to,
   limit = 500,
+  maxPoints,
 }: PositionHistoryQuery): Promise<Position[]> {
   const conditions = [eq(positions.deviceId, deviceId), WITH_FIX];
   if (from) conditions.push(gte(positions.ts, from));
   if (to) conditions.push(lte(positions.ts, to));
+
+  if (maxPoints) {
+    const light = await db
+      .select({ ts: positions.ts, speed: positions.speed })
+      .from(positions)
+      .where(and(...conditions))
+      .orderBy(asc(positions.ts));
+    const keep = thinningKeep(light, Math.min(maxPoints, 5000));
+    if (keep.length === 0) return [];
+    return db
+      .select()
+      .from(positions)
+      .where(and(eq(positions.deviceId, deviceId), inArray(positions.ts, keep)))
+      .orderBy(desc(positions.ts));
+  }
 
   return db
     .select()

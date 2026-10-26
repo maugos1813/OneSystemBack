@@ -12,6 +12,7 @@ const historyQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   limit: z.coerce.number().int().positive().max(5000).optional(),
+  maxPoints: z.coerce.number().int().min(2).max(5000).optional(),
 });
 
 const eventsQuerySchema = z.object({
@@ -26,6 +27,7 @@ const rangeQueryJsonSchema = {
     from: { type: "string", format: "date-time", description: "ISO 8601, inclusive" },
     to: { type: "string", format: "date-time", description: "ISO 8601, inclusive" },
     limit: { type: "integer", minimum: 1 },
+    maxPoints: { type: "integer", minimum: 2, description: "Reparte hasta este número de puntos por todo el rango (conserva los picos de velocidad)" },
   },
 };
 
