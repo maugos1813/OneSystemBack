@@ -4,7 +4,6 @@ import { deviceCommands, devices, type Device, type DeviceCommand } from "../db/
 import { encodeCodec12Command } from "../tcp-server/codec12.js";
 import { sendToDevice } from "../tcp-server/connections.js";
 import { getDeviceById } from "./device.service.js";
-import { DRIVING_RULES } from "./drivingStyle.service.js";
 import { getLatestReading } from "./position.service.js";
 
 export class CommandError extends Error {
@@ -25,11 +24,10 @@ export function supportsImmobilizer(model: string): boolean {
 
 /**
  * Models whose Green Driving parameters are in Teltonika's own parameter lists (FMB204 and FMC003 pages, FMB920 in the Green Driving
- * Solution page): 11000 scenario priority (0 off, 1 low), 11004/11005/11006 the limits for acceleration, braking and cornering in
- * m/s², 11007 the source (0 GPS, 1 accelerometer). Off by default, which is why a device sends no harsh-driving events (AVL 253) until
- * it is switched on.
+ * Solution page, FTC920 in its parameter list): a scenario priority (0 off, 1 low) and 11007, the source (0 GPS, 1 accelerometer).
+ * Off by default, which is why a device sends no harsh-driving events (AVL 253) until it is switched on.
  */
-const GREEN_DRIVING_MODELS: ReadonlySet<string> = new Set(["FMB204", "FMC003", "FMB920"]);
+const GREEN_DRIVING_MODELS: ReadonlySet<string> = new Set(["FMB204", "FMC003", "FMB920", "FTC920"]);
 
 export function supportsGreenDriving(model: string): boolean {
   return GREEN_DRIVING_MODELS.has(model);
@@ -38,11 +36,24 @@ export function supportsGreenDriving(model: string): boolean {
 export type GreenDrivingAction = "enable" | "disable";
 export type GreenDrivingSource = "accelerometer" | "gps";
 
-/** The order for the device (GPRS "setparam"), using the same limits OneTrack's own detection uses. */
-export function greenDrivingCommand(action: GreenDrivingAction, source: GreenDrivingSource = "accelerometer"): string {
-  if (action === "disable") return "setparam 11000:0";
-  const { harshAccelerationMs2: acceleration, harshBrakingMs2: braking, harshCorneringMs2: cornering } = DRIVING_RULES;
-  return `setparam 11000:1;11004:${acceleration};11005:${braking};11006:${cornering};11007:${source === "gps" ? 0 : 1}`;
+/** The FTC920 is of Teltonika's newer generation and moved the scenario priority from 11000 to 1025300. */
+const PRIORITY_ID: Record<string, number> = { FTC920: 1025300 };
+const DEFAULT_PRIORITY_ID = 11000;
+
+/**
+ * The order for the device (GPRS "setparam"). Only the switch and the source are sent: the limits for acceleration, braking and
+ * cornering stay at Teltonika's own defaults (2.5, 2.7 and 3.4 m/s²), because the lists give them as Uint8 with decimals and the
+ * scaling of a value written remotely isn't documented — a wrong guess would make the device report an event every few seconds.
+ */
+export function greenDrivingCommand(action: GreenDrivingAction, source: GreenDrivingSource = "accelerometer", model = ""): string {
+  const priority = PRIORITY_ID[model] ?? DEFAULT_PRIORITY_ID;
+  if (action === "disable") return `setparam ${priority}:0`;
+  return `setparam ${priority}:1;11007:${source === "gps" ? 0 : 1}`;
+}
+
+/** True for the order that switched the measurement off (whichever parameter the model uses). */
+export function isGreenDrivingOff(command: string): boolean {
+  return /\b(11000|1025300):0\b/.test(command);
 }
 
 /** A settings change can wait for a device that is off the network: it is harmless late, unlike a lock. */
@@ -148,7 +159,7 @@ export async function requestGreenDriving(
       deviceId: device.id,
       userId,
       kind: "green_driving",
-      command: greenDrivingCommand(action, source),
+      command: greenDrivingCommand(action, source, device.model),
       expiresAt: new Date(now.getTime() + GREEN_DRIVING_TTL_MS),
     })
     .returning();
@@ -207,7 +218,7 @@ export async function recordCommandResponse(deviceId: string, text: string, now:
   if (!failed && sent.kind === "green_driving") {
     await db
       .update(devices)
-      .set({ greenDrivingSince: sent.command.includes("11000:0") ? null : now })
+      .set({ greenDrivingSince: isGreenDrivingOff(sent.command) ? null : now })
       .where(eq(devices.id, deviceId));
   }
 }

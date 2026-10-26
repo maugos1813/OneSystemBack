@@ -201,28 +201,42 @@ describe("the device's answer", () => {
 });
 
 describe("requestGreenDriving", () => {
-  it("only works on a device of the organization whose model has the parameters (not the FTC920, not the Radius ones)", async () => {
+  it("only works on a device of the organization whose model has the parameters (not the Radius ones)", async () => {
     await expect(service.requestGreenDriving(OTHER_ORG, USER, FMC, "enable", "accelerometer", NOW)).rejects.toMatchObject({ status: 404 });
+    await db.update(devices).set({ model: "Otro" }).where(eq(devices.id, FTC));
     await expect(service.requestGreenDriving(ORG, USER, FTC, "enable", "accelerometer", NOW)).rejects.toMatchObject({ status: 400 });
     expect(await db.select().from(deviceCommands)).toHaveLength(0);
   });
 
-  it("queues the setparam order with OneTrack's limits and the accelerometer as the source", async () => {
+  it("queues the setparam order with the accelerometer as the source and the device's own limits", async () => {
     const command = await service.requestGreenDriving(ORG, USER, FMC, "enable", "accelerometer", NOW);
     expect(command).toMatchObject({
       kind: "green_driving",
       status: "pending",
-      command: "setparam 11000:1;11004:3;11005:3.5;11006:4;11007:1",
+      command: "setparam 11000:1;11007:1",
       userId: USER,
     });
     expect(service.greenDrivingCommand("enable", "gps")).toContain("11007:0");
     expect(service.greenDrivingCommand("disable")).toBe("setparam 11000:0");
   });
 
+  it("uses the FTC920's own priority parameter, and counts it when the device accepts", async () => {
+    harness.connected = true;
+    const on = await service.requestGreenDriving(ORG, USER, FTC, "enable", "accelerometer", NOW);
+    expect(on.command).toBe("setparam 1025300:1;11007:1");
+    await service.recordCommandResponse(FTC, "Param values accepted", minutes(1));
+    expect((await db.select().from(devices).where(eq(devices.id, FTC)))[0]?.greenDrivingSince).not.toBeNull();
+
+    const off = await service.requestGreenDriving(ORG, USER, FTC, "disable", "accelerometer", minutes(2));
+    expect(off.command).toBe("setparam 1025300:0");
+    await service.recordCommandResponse(FTC, "Param values accepted", minutes(3));
+    expect((await db.select().from(devices).where(eq(devices.id, FTC)))[0]?.greenDrivingSince).toBeNull();
+  });
+
   it("writes it to the device right away when it is connected", async () => {
     harness.connected = true;
     await service.requestGreenDriving(ORG, USER, FMC, "enable", "accelerometer", NOW);
-    expect(harness.sent).toEqual([{ imei: "860848088100319", text: "setparam 11000:1;11004:3;11005:3.5;11006:4;11007:1" }]);
+    expect(harness.sent).toEqual([{ imei: "860848088100319", text: "setparam 11000:1;11007:1" }]);
   });
 
   it("starts counting the device's own events when it accepts, and stops when switched off", async () => {
