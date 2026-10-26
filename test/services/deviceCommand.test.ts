@@ -43,7 +43,7 @@ beforeAll(async () => {
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid, imei varchar(20) NOT NULL UNIQUE,
       model varchar(50) NOT NULL DEFAULT 'FMB204', serial_number varchar(32), firmware varchar(32),
       status device_status NOT NULL DEFAULT 'unclaimed', source device_source NOT NULL DEFAULT 'teltonika',
-      last_seen_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+      last_seen_at timestamptz, green_driving_since timestamptz, created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE positions (
       id uuid NOT NULL DEFAULT gen_random_uuid(), device_id uuid NOT NULL, ts timestamptz NOT NULL,
@@ -51,7 +51,7 @@ beforeAll(async () => {
       satellites smallint, speed integer NOT NULL, priority smallint NOT NULL, io_data jsonb NOT NULL,
       PRIMARY KEY (id, ts)
     );
-    CREATE TYPE device_command_kind AS ENUM ('immobilize', 'release');
+    CREATE TYPE device_command_kind AS ENUM ('immobilize', 'release', 'green_driving');
     CREATE TYPE device_command_status AS ENUM ('pending', 'sent', 'confirmed', 'failed', 'expired', 'cancelled');
     CREATE TABLE device_commands (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, device_id uuid NOT NULL, user_id uuid,
@@ -197,5 +197,61 @@ describe("the device's answer", () => {
     expect((await service.listDeviceCommands(ORG, FTC, minutes(10)))[0]).toMatchObject({ status: "failed" });
     expect(await service.listDeviceCommands(OTHER_ORG, FTC, minutes(10))).toEqual([]);
     void device;
+  });
+});
+
+describe("requestGreenDriving", () => {
+  it("only works on a device of the organization whose model has the parameters (not the FTC920, not the Radius ones)", async () => {
+    await expect(service.requestGreenDriving(OTHER_ORG, USER, FMC, "enable", "accelerometer", NOW)).rejects.toMatchObject({ status: 404 });
+    await expect(service.requestGreenDriving(ORG, USER, FTC, "enable", "accelerometer", NOW)).rejects.toMatchObject({ status: 400 });
+    expect(await db.select().from(deviceCommands)).toHaveLength(0);
+  });
+
+  it("queues the setparam order with OneTrack's limits and the accelerometer as the source", async () => {
+    const command = await service.requestGreenDriving(ORG, USER, FMC, "enable", "accelerometer", NOW);
+    expect(command).toMatchObject({
+      kind: "green_driving",
+      status: "pending",
+      command: "setparam 11000:1;11004:3;11005:3.5;11006:4;11007:1",
+      userId: USER,
+    });
+    expect(service.greenDrivingCommand("enable", "gps")).toContain("11007:0");
+    expect(service.greenDrivingCommand("disable")).toBe("setparam 11000:0");
+  });
+
+  it("writes it to the device right away when it is connected", async () => {
+    harness.connected = true;
+    await service.requestGreenDriving(ORG, USER, FMC, "enable", "accelerometer", NOW);
+    expect(harness.sent).toEqual([{ imei: "860848088100319", text: "setparam 11000:1;11004:3;11005:3.5;11006:4;11007:1" }]);
+  });
+
+  it("starts counting the device's own events when it accepts, and stops when switched off", async () => {
+    harness.connected = true;
+    await service.requestGreenDriving(ORG, USER, FMC, "enable", "accelerometer", NOW);
+    await service.recordCommandResponse(FMC, "Param values accepted", minutes(1));
+    const [on] = await db.select().from(devices).where(eq(devices.id, FMC));
+    expect(on?.greenDrivingSince?.toISOString()).toBe(minutes(1).toISOString());
+
+    await service.requestGreenDriving(ORG, USER, FMC, "disable", "accelerometer", minutes(2));
+    await service.recordCommandResponse(FMC, "Param values accepted", minutes(3));
+    const [off] = await db.select().from(devices).where(eq(devices.id, FMC));
+    expect(off?.greenDrivingSince).toBeNull();
+  });
+
+  it("does not switch it on when the device refuses", async () => {
+    harness.connected = true;
+    await service.requestGreenDriving(ORG, USER, FMC, "enable", "accelerometer", NOW);
+    await service.recordCommandResponse(FMC, "Wrong parameter id", minutes(1));
+    const [row] = await db.select().from(devices).where(eq(devices.id, FMC));
+    expect(row?.greenDrivingSince).toBeNull();
+    expect((await db.select().from(deviceCommands))[0]).toMatchObject({ status: "failed" });
+  });
+
+  it("is not cancelled by a lock order, and does not cancel one", async () => {
+    const settings = await service.requestGreenDriving(ORG, USER, FMC, "enable", "accelerometer", NOW);
+    await db.update(devices).set({ model: "FMB920" }).where(eq(devices.id, FTC));
+    await service.requestImmobilizer(ORG, USER, FTC, "lock", NOW);
+    const [row] = await db.select().from(deviceCommands).where(eq(deviceCommands.id, settings.id));
+    expect(row).toMatchObject({ status: "pending" });
   });
 });

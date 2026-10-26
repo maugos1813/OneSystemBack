@@ -22,6 +22,9 @@ export const devices = pgTable("devices", {
   status: deviceStatusEnum("status").notNull().default("unclaimed"),
   source: deviceSourceEnum("source").notNull().default("teltonika"),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  /** When the device confirmed it measures harsh driving itself (Green Driving); null while it does not. Driving scores
+   * count its own events only from here on. */
+  greenDrivingSince: timestamp("green_driving_since", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

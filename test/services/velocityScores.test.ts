@@ -134,6 +134,8 @@ describe("putting Velocity's numbers on the vehicles", () => {
     fleetGroup: "DHL",
     source: "onetrack" as const,
     scoring: "per_100km" as const,
+    eventSource: "gps" as const,
+    measuredSince: null,
     samples: 500,
     distanceKm: 10,
     drivingHours: 1,

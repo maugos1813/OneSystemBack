@@ -36,6 +36,10 @@ export interface VelocityVehicleScores {
 
 const cache = new Map<string, { expiresAt: number; value: Map<string, VelocityVehicleScores> }>();
 
+/** After Velocity refuses (or fails), nothing is asked of it for a while: no point repeating a refusal on every page load. */
+const RETRY_AFTER_FAILURE_MS = 30 * 60_000;
+let failedUntil = 0;
+
 /** "2026-10-26" for an instant, as the calendar day in Rome. */
 export function reportDay(date: Date): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
@@ -109,7 +113,7 @@ async function post(token: string, from: string, to: string): Promise<Response> 
  * (Velocity scores whole calendar days, so a window of "the last 24 hours" covers yesterday and today.)
  */
 export async function fetchVelocityScores(from: Date, to: Date, now: number = Date.now()): Promise<Map<string, VelocityVehicleScores> | null> {
-  if (!env.RADIUS_VELOCITY_REFRESH_TOKEN) return null;
+  if (!env.RADIUS_VELOCITY_REFRESH_TOKEN || now < failedUntil) return null;
   const dayFrom = reportDay(from);
   const dayTo = reportDay(to);
   const key = `${env.RADIUS_VELOCITY_CUSTOMER_ID}|${dayFrom}|${dayTo}`;
@@ -126,6 +130,7 @@ export async function fetchVelocityScores(from: Date, to: Date, now: number = Da
     cache.set(key, { expiresAt: now + CACHE_TTL_MS, value: scores });
     return scores;
   } catch (err) {
+    failedUntil = now + RETRY_AFTER_FAILURE_MS;
     logger.warn({ err: err instanceof Error ? err.message : String(err), dayFrom, dayTo }, "Could not read the driver scores of Radius Velocity");
     return null;
   }
@@ -134,4 +139,5 @@ export async function fetchVelocityScores(from: Date, to: Date, now: number = Da
 /** For tests: forget what was remembered. */
 export function clearVelocityScoresCache(): void {
   cache.clear();
+  failedUntil = 0;
 }

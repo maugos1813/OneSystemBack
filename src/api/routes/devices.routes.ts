@@ -5,6 +5,7 @@ import { claimDevice, getDeviceDetail, isValidImei, listDevicesForOrg, updateDev
 import {
   CommandError,
   listDeviceCommands,
+  requestGreenDriving,
   requestImmobilizer,
 } from "../../services/deviceCommand.service.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
@@ -30,6 +31,10 @@ const patchSchema = z.object({
 });
 
 const immobilizerSchema = z.object({ action: z.enum(["lock", "unlock"]) });
+const greenDrivingSchema = z.object({
+  action: z.enum(["enable", "disable"]),
+  source: z.enum(["accelerometer", "gps"]).default("accelerometer"),
+});
 
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -159,6 +164,43 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
 
       try {
         const command = await requestImmobilizer(request.user.orgId, request.user.userId, params.data.id, body.data.action);
+        return reply.code(202).send(command);
+      } catch (err) {
+        if (err instanceof CommandError) return reply.code(err.status).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  app.post(
+    "/devices/:id/green-driving",
+    {
+      preHandler: requireRole("owner", "admin"),
+      schema: {
+        tags: ["Devices"],
+        summary: "Activar o desactivar la medición de conducción brusca del propio dispositivo (Green Driving)",
+        security: AUTH,
+        params: zodToJsonSchema(idParams),
+        body: zodToJsonSchema(greenDrivingSchema),
+      },
+    },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      const body = greenDrivingSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: body.success ? "Invalid device id" : body.error.flatten() });
+      }
+      // A device's settings are for the organization's own people, not an account limited to one flota.
+      if (request.user.allowedArea) return reply.code(403).send({ error: "Forbidden" });
+
+      try {
+        const command = await requestGreenDriving(
+          request.user.orgId,
+          request.user.userId,
+          params.data.id,
+          body.data.action,
+          body.data.source,
+        );
         return reply.code(202).send(command);
       } catch (err) {
         if (err instanceof CommandError) return reply.code(err.status).send({ error: err.message });

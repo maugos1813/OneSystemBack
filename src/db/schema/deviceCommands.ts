@@ -3,7 +3,7 @@ import { devices } from "./devices.js";
 import { organizations } from "./organizations.js";
 import { users } from "./users.js";
 
-export const deviceCommandKindEnum = pgEnum("device_command_kind", ["immobilize", "release"]);
+export const deviceCommandKindEnum = pgEnum("device_command_kind", ["immobilize", "release", "green_driving"]);
 // pending: waiting for the device to be connected · sent: written to its socket ·
 // confirmed/failed: what the device answered · expired: never delivered in time · cancelled: replaced by a newer one.
 export const deviceCommandStatusEnum = pgEnum("device_command_status", [

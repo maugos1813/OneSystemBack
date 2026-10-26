@@ -28,7 +28,7 @@ beforeAll(async () => {
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid, imei varchar(20) NOT NULL UNIQUE,
       model varchar(50) NOT NULL DEFAULT 'FMB204', serial_number varchar(32), firmware varchar(32),
       status device_status NOT NULL DEFAULT 'unclaimed', source device_source NOT NULL DEFAULT 'teltonika',
-      last_seen_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+      last_seen_at timestamptz, green_driving_since timestamptz, created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
 });

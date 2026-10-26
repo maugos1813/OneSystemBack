@@ -1,5 +1,6 @@
-import { sql } from "drizzle-orm";
+import { inArray, isNotNull, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
+import { devices } from "../db/schema/index.js";
 import { listVehiclesForOrg } from "./vehicle.service.js";
 import { fetchVelocityScores, type VelocityVehicleScores } from "./velocityScores.service.js";
 
@@ -129,6 +130,10 @@ export interface VehicleDrivingStyle {
   fleetGroup: string | null;
   /** Where the numbers come from: OneTrack's own calculation on the GPS positions, or Radius Velocity's finished report. */
   source: "onetrack" | "velocity";
+  /** What found the harsh events: the device's own sensor (Green Driving), the GPS positions, or Velocity's devices. */
+  eventSource: "device" | "gps" | "velocity";
+  /** For "device": the moment its own measurement started, which is where the count (and the hours it is judged by) begins. */
+  measuredSince: string | null;
   /** How the scores were worked out: Velocity's events-per-hour formula, or OneTrack's original incidents-per-100-km. */
   scoring: "per_hour" | "per_100km";
   /** GPS reports analysed in the period. 0 means there is no data, not perfect driving. */
@@ -161,7 +166,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 export function summarize(
   stats: RawStats | undefined,
   scoring: VehicleDrivingStyle["scoring"] = "per_100km",
-): Omit<VehicleDrivingStyle, "vehicleId" | "name" | "plate" | "fleetGroup" | "source"> {
+): Omit<VehicleDrivingStyle, "vehicleId" | "name" | "plate" | "fleetGroup" | "source" | "eventSource" | "measuredSince"> {
   const noIncidents = { harshBraking: 0, harshAcceleration: 0, harshCornering: 0, speeding: 0 };
   if (!stats || stats.samples === 0) {
     return { scoring, samples: 0, distanceKm: 0, drivingHours: 0, trips: 0, quality: "no_data", scores: null, incidents: noIncidents, incidentsPer100Km: null };
@@ -346,6 +351,39 @@ export async function queryStats(deviceIds: string[], from: Date, to: Date, spee
   );
 }
 
+/** Harsh-driving events the device itself reported (Teltonika Green Driving, AVL 253: 1 acceleration, 2 braking, 3 cornering). */
+export interface DeviceEventCounts {
+  harshAcceleration: number;
+  harshBraking: number;
+  harshCornering: number;
+}
+
+/** The device may repeat an event record while it lasts: records of one type closer than this are the same event. */
+const SAME_EVENT_WITHIN_S = 5;
+
+export async function queryGreenDrivingCounts(deviceIds: string[], from: Date, to: Date): Promise<Map<string, DeviceEventCounts>> {
+  const out = new Map<string, DeviceEventCounts>();
+  if (deviceIds.length === 0) return out;
+  const { rows } = await db.execute<{ device_id: string; kind: number; n: number }>(sql`
+    select device_id, kind, count(*)::int as n from (
+      select device_id, (io_data->>'253')::int as kind, ts,
+             lag(ts) over (partition by device_id, (io_data->>'253') order by ts) as p
+      from positions
+      where device_id in (${idList(deviceIds)}) and ts >= ${from} and ts <= ${to} and (io_data->>'253') in ('1', '2', '3')
+    ) e
+    where p is null or ts - p > interval '${sql.raw(String(SAME_EVENT_WITHIN_S))} seconds'
+    group by device_id, kind
+  `);
+  for (const r of rows) {
+    const counts = out.get(r.device_id) ?? { harshAcceleration: 0, harshBraking: 0, harshCornering: 0 };
+    if (r.kind === 1) counts.harshAcceleration = r.n;
+    else if (r.kind === 2) counts.harshBraking = r.n;
+    else if (r.kind === 3) counts.harshCornering = r.n;
+    out.set(r.device_id, counts);
+  }
+  return out;
+}
+
 const cache = new Map<string, { expiresAt: number; value: VehicleDrivingStyle[] }>();
 
 export interface DrivingStyleQuery {
@@ -389,6 +427,8 @@ export function applyVelocityScores(vehicles: VehicleDrivingStyle[], velocity: M
     return {
       ...v,
       source: "velocity",
+      eventSource: "velocity",
+      measuredSince: null,
       scoring: "per_hour",
       distanceKm: round1(own.distanceKm),
       drivingHours: round1(own.drivingHours),
@@ -444,12 +484,35 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
   const deviceIds = fleet.flatMap((v) => (v.deviceId ? [v.deviceId] : []));
   const statsByDevice = await queryStats(deviceIds, from, to, query.speedLimitKmh);
 
+  // Velocity's method counts the events the DEVICE detects: where a tracker measures them itself (Green Driving switched on), its own
+  // events replace the ones found in the GPS, over the hours since it started (never over hours it was not measuring).
+  const measuredSince = new Map<string, Date>();
+  if (scoring === "per_hour") {
+    const measuring = await db
+      .select({ id: devices.id, since: devices.greenDrivingSince })
+      .from(devices)
+      .where(and(inArray(devices.id, deviceIds.length > 0 ? deviceIds : ["00000000-0000-0000-0000-000000000000"]), isNotNull(devices.greenDrivingSince)));
+    for (const { id, since } of measuring) {
+      const start = since && since > from ? since : from;
+      if (!since || start >= to) continue;
+      const [gps, events] = await Promise.all([queryStats([id], start, to, query.speedLimitKmh), queryGreenDrivingCounts([id], start, to)]);
+      const own = gps.get(id);
+      // Too few hours measured yet to judge by: the GPS-based score stands until there are.
+      if (!own || own.movingSeconds / 3600 < VELOCITY_METHOD.minHours) continue;
+      const counts = events.get(id) ?? { harshAcceleration: 0, harshBraking: 0, harshCornering: 0 };
+      statsByDevice.set(id, { ...own, denseKm: own.distanceKm, ...counts });
+      measuredSince.set(id, start);
+    }
+  }
+
   const vehicles: VehicleDrivingStyle[] = fleet.map((v) => ({
     vehicleId: v.id,
     name: v.name,
     plate: v.plate,
     fleetGroup: v.fleetGroup,
     source: "onetrack" as const,
+    eventSource: v.deviceId && measuredSince.has(v.deviceId) ? ("device" as const) : ("gps" as const),
+    measuredSince: v.deviceId ? (measuredSince.get(v.deviceId)?.toISOString() ?? null) : null,
     ...summarize(v.deviceId ? statsByDevice.get(v.deviceId) : undefined, scoring),
   }));
 
