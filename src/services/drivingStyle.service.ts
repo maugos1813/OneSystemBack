@@ -42,9 +42,31 @@ const MIN_DISTANCE_KM = 20;
 /** Share of the distance that must be covered by dense reports for the harsh-event rules to mean anything. */
 const MIN_DENSE_SHARE = 0.5;
 
+/**
+ * Radius Velocity's own way of scoring, read off its Driver Performance report (18 vehicles, a week and a day): every category is
+ * `100 − K × events per hour of driving`, floored at 0, and the overall score is the plain average of the four (25% each, the
+ * account's "Rating Settings"). The acceleration constant fits all 26 cases checked exactly; braking and cornering to within 2 and 1
+ * points. Velocity's speeding score depends on more than the event count, so its constant is an approximation (about 12–16 per event
+ * per hour). Velocity counts what the device's accelerometer detects; here the events are the ones OneTrack finds in the GPS.
+ */
+export const VELOCITY_METHOD = {
+  acceleration: { k: 27.7, round: Math.round },
+  braking: { k: 54.5, round: Math.ceil },
+  cornering: { k: 49.2, round: Math.round },
+  speeding: { k: 14.5, round: Math.round },
+  /** Below this many hours of driving a rate per hour says nothing. */
+  minHours: 2,
+} as const;
+
 export const DEFAULT_SPEED_LIMIT_KMH = 120;
 const CACHE_TTL_MS = 5 * 60_000;
 const CACHE_MAX_ENTRIES = 500;
+
+/** Velocity's formula for one category: 0–100, where 100 is no events. */
+export function velocityScore(events: number, hours: number, category: "acceleration" | "braking" | "cornering" | "speeding"): number {
+  const { k, round } = VELOCITY_METHOD[category];
+  return Math.max(0, Math.min(100, round(100 - (k * events) / hours)));
+}
 
 export const DRIVING_RULES = {
   harshBrakingMs2: HARSH_BRAKING_MS2,
@@ -53,6 +75,7 @@ export const DRIVING_RULES = {
   speedingMinSeconds: MIN_SPEEDING_STRETCH_S,
   pointsPerIncidentPer100Km: POINTS_PER_INCIDENT_PER_100KM,
   minDistanceKm: MIN_DISTANCE_KM,
+  velocityMinHours: VELOCITY_METHOD.minHours,
 } as const;
 
 export interface IncidentCounts {
@@ -106,6 +129,8 @@ export interface VehicleDrivingStyle {
   fleetGroup: string | null;
   /** Where the numbers come from: OneTrack's own calculation on the GPS positions, or Radius Velocity's finished report. */
   source: "onetrack" | "velocity";
+  /** How the scores were worked out: Velocity's events-per-hour formula, or OneTrack's original incidents-per-100-km. */
+  scoring: "per_hour" | "per_100km";
   /** GPS reports analysed in the period. 0 means there is no data, not perfect driving. */
   samples: number;
   distanceKm: number;
@@ -133,13 +158,17 @@ export interface VehicleDrivingStyle {
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /** Pure: raw aggregate numbers -> what the API returns for one vehicle. */
-export function summarize(stats: RawStats | undefined): Omit<VehicleDrivingStyle, "vehicleId" | "name" | "plate" | "fleetGroup" | "source"> {
+export function summarize(
+  stats: RawStats | undefined,
+  scoring: VehicleDrivingStyle["scoring"] = "per_100km",
+): Omit<VehicleDrivingStyle, "vehicleId" | "name" | "plate" | "fleetGroup" | "source"> {
   const noIncidents = { harshBraking: 0, harshAcceleration: 0, harshCornering: 0, speeding: 0 };
   if (!stats || stats.samples === 0) {
-    return { samples: 0, distanceKm: 0, drivingHours: 0, trips: 0, quality: "no_data", scores: null, incidents: noIncidents, incidentsPer100Km: null };
+    return { scoring, samples: 0, distanceKm: 0, drivingHours: 0, trips: 0, quality: "no_data", scores: null, incidents: noIncidents, incidentsPer100Km: null };
   }
 
   const base = {
+    scoring,
     samples: stats.samples,
     distanceKm: round1(stats.distanceKm),
     drivingHours: round1(stats.movingSeconds / 3600),
@@ -150,7 +179,9 @@ export function summarize(stats: RawStats | undefined): Omit<VehicleDrivingStyle
   // judge by (parked), there is nothing to contradict the counts, so they stand.
   const detectable = stats.distanceKm === 0 || stats.denseKm / stats.distanceKm >= MIN_DENSE_SHARE;
 
-  if (stats.distanceKm < MIN_DISTANCE_KM) {
+  const hours = stats.movingSeconds / 3600;
+  const tooShort = scoring === "per_hour" ? hours < VELOCITY_METHOD.minHours : stats.distanceKm < MIN_DISTANCE_KM;
+  if (tooShort) {
     // Too short to score — but the raw counts are still returned, so a caller can add up many
     // short stretches and score the total with the same formula.
     return {
@@ -171,12 +202,13 @@ export function summarize(stats: RawStats | undefined): Omit<VehicleDrivingStyle
 
   const per100 = (n: number) => round1((n / stats.distanceKm) * 100);
 
-  const speeding = scoreFromRate(per100(stats.speeding));
+  const perHour = scoring === "per_hour";
+  const speeding = perHour ? velocityScore(stats.speeding, hours, "speeding") : scoreFromRate(per100(stats.speeding));
   const harsh = detectable
     ? {
-        harshBraking: scoreFromRate(per100(stats.harshBraking)),
-        harshAcceleration: scoreFromRate(per100(stats.harshAcceleration)),
-        harshCornering: scoreFromRate(per100(stats.harshCornering)),
+        harshBraking: perHour ? velocityScore(stats.harshBraking, hours, "braking") : scoreFromRate(per100(stats.harshBraking)),
+        harshAcceleration: perHour ? velocityScore(stats.harshAcceleration, hours, "acceleration") : scoreFromRate(per100(stats.harshAcceleration)),
+        harshCornering: perHour ? velocityScore(stats.harshCornering, hours, "cornering") : scoreFromRate(per100(stats.harshCornering)),
       }
     : { harshBraking: null, harshAcceleration: null, harshCornering: null };
 
@@ -328,7 +360,7 @@ export interface DrivingStyleQuery {
   /** End of the window (only with `from`); omitted = now. The caller has already validated it. */
   to?: Date;
   speedLimitKmh: number;
-  /** Use Radius Velocity's own scores for the vehicles it tracks (the app's Conducción page); the public API keeps OneTrack's calculation. */
+  /** Velocity mode (the app's Conducción page): Velocity's own scores for the vehicles it tracks and Velocity's formula for the rest; the public API keeps OneTrack's original calculation. */
   preferVelocity?: boolean;
 }
 
@@ -357,6 +389,7 @@ export function applyVelocityScores(vehicles: VehicleDrivingStyle[], velocity: M
     return {
       ...v,
       source: "velocity",
+      scoring: "per_hour",
       distanceKm: round1(own.distanceKm),
       drivingHours: round1(own.drivingHours),
       trips: own.trips,
@@ -394,7 +427,8 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
 
   // Exact windows are keyed by both ends; `days`/since-midnight requests keep their original key.
   const windowKey = exactWindow ? `${from.toISOString()}..${to.toISOString()}` : (query.from?.toISOString() ?? query.days);
-  const cacheKey = `${query.orgId}|${query.allowedArea ?? ""}|${query.vehicleId ?? "*"}|${windowKey}|${query.speedLimitKmh}`;
+  const scoring: VehicleDrivingStyle["scoring"] = query.preferVelocity ? "per_hour" : "per_100km";
+  const cacheKey = `${query.orgId}|${query.allowedArea ?? ""}|${query.vehicleId ?? "*"}|${windowKey}|${query.speedLimitKmh}|${scoring}`;
   const withVelocity = async (own: VehicleDrivingStyle[]): Promise<VehicleDrivingStyle[]> => {
     if (!query.preferVelocity) return own;
     const velocity = await fetchVelocityScores(from, to);
@@ -416,7 +450,7 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
     plate: v.plate,
     fleetGroup: v.fleetGroup,
     source: "onetrack" as const,
-    ...summarize(v.deviceId ? statsByDevice.get(v.deviceId) : undefined),
+    ...summarize(v.deviceId ? statsByDevice.get(v.deviceId) : undefined, scoring),
   }));
 
   const closed = exactWindow && Date.now() - to.getTime() > CLOSED_WINDOW_AFTER_MS;
