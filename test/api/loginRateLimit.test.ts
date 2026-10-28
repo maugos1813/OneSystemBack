@@ -57,10 +57,11 @@ describe("login and registration limits", () => {
     expect(res.json()).toHaveProperty("token");
   });
 
-  it("trusts only the address the proxy saw: a made-up X-Forwarded-For does not buy a fresh allowance", async () => {
-    for (let i = 0; i < LOGIN_LIMITS.perAddressAndEmail; i++) await login("a@x.com", "10.0.0.1", { "x-forwarded-for": `1.1.1.${i}, 5.5.5.5` });
-    expect((await login("a@x.com", "10.0.0.1", { "x-forwarded-for": "2.2.2.2, 5.5.5.5" })).statusCode).toBe(429);
-    expect((await login("a@x.com", "10.0.0.1", { "x-forwarded-for": "2.2.2.2, 6.6.6.6" })).statusCode).toBe(401);
+  it("tells clients apart by the address Railway's edge reports in X-Real-IP, not by the edge's own address", async () => {
+    // Every request reaches the app from a different edge address, but the client is the same.
+    for (let i = 0; i < LOGIN_LIMITS.perAddressAndEmail; i++) await login("a@x.com", `152.233.12.${i}`, { "x-real-ip": "203.0.113.7" });
+    expect((await login("a@x.com", "152.233.99.1", { "x-real-ip": "203.0.113.7" })).statusCode).toBe(429);
+    expect((await login("a@x.com", "152.233.99.1", { "x-real-ip": "203.0.113.8" })).statusCode).toBe(401);
   });
 
   it("limits how many organizations one address can open per hour", async () => {

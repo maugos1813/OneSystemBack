@@ -28,6 +28,15 @@ async function refuse(reply: FastifyReply, retryAfterSec: number): Promise<void>
   await reply.code(429).send({ error: "Too many attempts. Try again later.", retryAfterSeconds: retryAfterSec });
 }
 
+/**
+ * The client's own address. Railway's edge puts it in X-Real-IP (the socket only shows one of the edge's addresses, a different one
+ * from request to request); anywhere else (tests, local) there is no such header and the socket address is the client's.
+ */
+export function clientAddress(request: FastifyRequest): string {
+  const real = request.headers["x-real-ip"];
+  return typeof real === "string" && real.length > 0 && real.length <= 45 ? real.trim() : request.ip;
+}
+
 const emailOf = (request: FastifyRequest): string => {
   const email = (request.body as { email?: unknown } | null)?.email;
   return typeof email === "string" ? email.trim().toLowerCase().slice(0, 254) : "";
@@ -35,15 +44,18 @@ const emailOf = (request: FastifyRequest): string => {
 
 /** preHandler for POST /auth/login (the body is parsed by then). */
 export async function rateLimitLogin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const address = request.ip;
+  const address = clientAddress(request);
   const email = emailOf(request);
   const results = [byAddress.hit(address), byAddressAndEmail.hit(`${address}|${email}`)];
   const blocked = results.filter((r) => !r.allowed);
-  if (blocked.length > 0) await refuse(reply, Math.max(...blocked.map((r) => r.retryAfterSec)));
+  if (blocked.length > 0) {
+    request.log.warn({ address }, "Login attempts blocked: too many from this address");
+    await refuse(reply, Math.max(...blocked.map((r) => r.retryAfterSec)));
+  }
 }
 
 /** preHandler for POST /auth/register. */
 export async function rateLimitRegister(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const result = registrations.hit(request.ip);
+  const result = registrations.hit(clientAddress(request));
   if (!result.allowed) await refuse(reply, result.retryAfterSec);
 }
