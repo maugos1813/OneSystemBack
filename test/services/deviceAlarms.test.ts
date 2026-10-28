@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { ALARM_MAX_AGE_MS, DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive } from "../../src/services/deviceAlarms.js";
+import {
+  ALARM_MAX_AGE_MS,
+  DEVICE_ALARM_KEYS,
+  DEVICE_ALARMS,
+  findTrackingGaps,
+  isAlarmActive,
+  isTrackingGapActive,
+  trackingGapMessage,
+} from "../../src/services/deviceAlarms.js";
 import { eventTypeFromAvlId } from "../../src/services/position.service.js";
 import { DEFAULT_SETTINGS, withDefaults } from "../../src/services/settings.service.js";
 
@@ -50,5 +58,31 @@ describe("tracker alarms", () => {
     const legacy = withDefaults({ alerts: { speedingEnabled: false }, workingHours: {} });
     expect(legacy.alerts.deviceAlarmsEnabled).toBe(true);
     expect(legacy.alerts.speedingEnabled).toBe(false);
+  });
+});
+
+describe("tracking gaps", () => {
+  const at = (min: number) => new Date(NOW.getTime() + min * 60_000);
+
+  it("finds the stretches of an hour or more with no record, measured from the newest stored one", () => {
+    expect(findTrackingGaps(at(0), [at(10), at(20)])).toEqual([]);
+    expect(findTrackingGaps(at(0), [at(90)])).toEqual([{ from: at(0), to: at(90) }]);
+    expect(findTrackingGaps(at(0), [at(200), at(210), at(400)])).toEqual([
+      { from: at(0), to: at(200) },
+      { from: at(210), to: at(400) },
+    ]);
+    expect(findTrackingGaps(null, [at(0), at(500)])).toEqual([{ from: at(0), to: at(500) }]);
+    expect(findTrackingGaps(null, [at(0)])).toEqual([]);
+  });
+
+  it("is raised for a day, then lapses", () => {
+    expect(isTrackingGapActive(ago(60_000), NOW)).toBe(true);
+    expect(isTrackingGapActive(ago(ALARM_MAX_AGE_MS + 1000), NOW)).toBe(false);
+  });
+
+  it("reads how long the tracker did not record, in both languages", () => {
+    expect(trackingGapMessage("EX030XG", { minutes: 706 })).toContain("11 h 46 min");
+    expect(trackingGapMessage("EX030XG", { minutes: 45 }, "it")).toContain("45 min");
+    expect(trackingGapMessage("EX030XG", { minutes: 706 }, "it")).toContain("EX030XG");
   });
 });

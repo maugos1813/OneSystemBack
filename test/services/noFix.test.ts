@@ -217,4 +217,23 @@ describe("storing reports", () => {
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("unplug_change");
   });
+
+  it("records a silent stretch (tracker off or unplugged) when it reports again, but not a normal pause", async () => {
+    await position.storeAvlRecords(DEVICE, [record(at(0), 45.1, 9.1)]);
+    await position.storeAvlRecords(DEVICE, [record(at(30), 45.1, 9.1)]); // half an hour: parked
+    expect((await db.select().from(deviceEvents)).filter((e) => e.type === "tracking_gap")).toHaveLength(0);
+
+    await position.storeAvlRecords(DEVICE, [record(at(30 + 12 * 60), 0, 0), record(at(30 + 12 * 60 + 1), 45.2, 9.2)]);
+    const gaps = (await db.select().from(deviceEvents)).filter((e) => e.type === "tracking_gap");
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({ ts: at(30 + 12 * 60), payload: { minutes: 12 * 60 } });
+  });
+
+  it("does not flag the first report of a device, nor a backlog that fills the stretch in", async () => {
+    await position.storeAvlRecords(DEVICE, [record(at(500), 45.1, 9.1)]);
+    expect(await db.select().from(deviceEvents)).toHaveLength(0);
+    // an old backlog sent late: its records sit before the newest one and are spaced normally
+    await position.storeAvlRecords(DEVICE, [record(at(100), 45.1, 9.1), record(at(110), 45.1, 9.1)]);
+    expect((await db.select().from(deviceEvents)).filter((e) => e.type === "tracking_gap")).toHaveLength(0);
+  });
 });

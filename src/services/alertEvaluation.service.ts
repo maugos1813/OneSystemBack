@@ -7,7 +7,15 @@ import { localized, toLanguage, type Localized } from "./i18n.js";
 import { listGeofencesForOrg } from "./geofence.service.js";
 import { listDevicesForOrg } from "./device.service.js";
 import { getLatestAlarmEvents, getLatestPosition, getLatestReading } from "./position.service.js";
-import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive } from "./deviceAlarms.js";
+import {
+  DEVICE_ALARM_KEYS,
+  DEVICE_ALARMS,
+  isAlarmActive,
+  isTrackingGapActive,
+  TRACKING_GAP_ALERT,
+  TRACKING_GAP_EVENT,
+  trackingGapMessage,
+} from "./deviceAlarms.js";
 import { alertsForRecipient, type AlertRecipient } from "./alertRecipients.js";
 import { alertPushMessage, sendPushToUsers } from "./push.service.js";
 import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
@@ -278,6 +286,17 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
           collector,
         );
       }
+
+      const gap = latest.get(TRACKING_GAP_EVENT);
+      await ongoingCondition(
+        orgId,
+        vehicle.id,
+        vehicle.name,
+        TRACKING_GAP_ALERT,
+        !!gap && isTrackingGapActive(gap.ts, now),
+        localized((lang) => trackingGapMessage(vehicle.name, gap?.payload, lang)),
+        collector,
+      );
     }
 
     if (settings.alerts.speedingEnabled) {

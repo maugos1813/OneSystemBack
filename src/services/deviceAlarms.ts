@@ -47,3 +47,46 @@ export function isAlarmActive(payload: unknown, avlId: number, eventTs: Date, no
   const value = (payload as Record<string, number | string> | null)?.[String(avlId)];
   return value !== undefined && Number(value) !== 0;
 }
+
+/**
+ * A stretch in which the tracker recorded nothing at all: it was off or unplugged (a tracker that merely lost coverage keeps
+ * recording and sends the backlog later, with its original times). Whatever the vehicle did in that stretch is not in the history —
+ * a toll or Area C crossing included — so it is raised as an alert the moment the tracker reports again.
+ */
+export const TRACKING_GAP_EVENT = "tracking_gap";
+export const TRACKING_GAP_ALERT = "tracking_gap";
+/** A parked tracker still records at least every few minutes, so an hour of silence is not rest. */
+export const TRACKING_GAP_MIN_MS = 60 * 60_000;
+
+export interface TrackingGap {
+  from: Date;
+  to: Date;
+}
+
+/** The stretches without a record: between `previous` (the newest one already stored) and the new `timestamps`, in time order. */
+export function findTrackingGaps(previous: Date | null, timestamps: Date[], minGapMs: number = TRACKING_GAP_MIN_MS): TrackingGap[] {
+  const gaps: TrackingGap[] = [];
+  let last = previous;
+  for (const ts of [...timestamps].sort((a, b) => a.getTime() - b.getTime())) {
+    if (last && ts.getTime() - last.getTime() >= minGapMs) gaps.push({ from: last, to: ts });
+    if (!last || ts.getTime() > last.getTime()) last = ts;
+  }
+  return gaps;
+}
+
+export function isTrackingGapActive(eventTs: Date, now: Date = new Date()): boolean {
+  return now.getTime() - eventTs.getTime() <= ALARM_MAX_AGE_MS;
+}
+
+function duration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours > 0 ? `${hours} h ${rest} min` : `${rest} min`;
+}
+
+export function trackingGapMessage(vehicle: string, payload: unknown, language: Language = "es"): string {
+  const { minutes = 0 } = (payload ?? {}) as { minutes?: number };
+  return language === "it"
+    ? `${vehicle}: il dispositivo è rimasto ${duration(minutes)} senza registrare (spento o scollegato). Il percorso di quel periodo non è stato registrato.`
+    : `${vehicle}: el dispositivo estuvo ${duration(minutes)} sin registrar (apagado o desconectado). El recorrido de ese periodo no quedó registrado.`;
+}

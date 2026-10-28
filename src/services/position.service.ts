@@ -1,10 +1,10 @@
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { deviceEvents, positions, type DeviceEvent, type Position } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { serializeIoElements } from "../tcp-server/codec8/ioSerialize.js";
 import type { AvlRecord } from "../tcp-server/codec8/types.js";
-import { DEVICE_ALARM_KEYS, DEVICE_ALARMS } from "./deviceAlarms.js";
+import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, findTrackingGaps, TRACKING_GAP_EVENT } from "./deviceAlarms.js";
 import { detectTollPassages } from "./tollDetection.service.js";
 
 const EVENT_AVL_IDS: ReadonlySet<number> = new Set([
@@ -22,6 +22,16 @@ export async function storeAvlRecords(deviceId: string, records: AvlRecord[]): P
   if (records.length === 0) return;
 
   await db.transaction(async (tx) => {
+    // The newest record stored before this packet: what the first of these is measured against to see a silent stretch.
+    const earliest = new Date(Math.min(...records.map((record) => record.timestamp.getTime())));
+    const [previous] = await tx
+      .select({ ts: positions.ts })
+      .from(positions)
+      .where(and(eq(positions.deviceId, deviceId), lt(positions.ts, earliest)))
+      .orderBy(desc(positions.ts))
+      .limit(1);
+    const gaps = findTrackingGaps(previous?.ts ?? null, records.map((record) => record.timestamp));
+
     await tx.insert(positions).values(
       records.map((record) => ({
         deviceId,
@@ -46,8 +56,15 @@ export async function storeAvlRecords(deviceId: string, records: AvlRecord[]): P
         payload: serializeIoElements(record.io),
       }));
 
-    if (eventRows.length > 0) {
-      await tx.insert(deviceEvents).values(eventRows);
+    const gapRows = gaps.map((gap) => ({
+      deviceId,
+      ts: gap.to,
+      type: TRACKING_GAP_EVENT,
+      payload: { from: gap.from.toISOString(), to: gap.to.toISOString(), minutes: Math.round((gap.to.getTime() - gap.from.getTime()) / 60_000) },
+    }));
+
+    if (eventRows.length + gapRows.length > 0) {
+      await tx.insert(deviceEvents).values([...eventRows, ...gapRows]);
     }
   });
 
@@ -218,7 +235,7 @@ export async function getDeviceEvents({
 /** The newest event of each tracker-alarm type for a device (what decides whether the alarm
  * is currently raised). Keyed by event type; types that never happened are absent. */
 export async function getLatestAlarmEvents(deviceId: string): Promise<Map<string, DeviceEvent>> {
-  const types = DEVICE_ALARM_KEYS.map((key) => DEVICE_ALARMS[key].eventType);
+  const types = [...DEVICE_ALARM_KEYS.map((key) => DEVICE_ALARMS[key].eventType), TRACKING_GAP_EVENT];
   const rows = await db
     .selectDistinctOn([deviceEvents.type])
     .from(deviceEvents)
