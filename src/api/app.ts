@@ -26,7 +26,20 @@ import { tollsRoutes } from "./routes/tolls.routes.js";
 import { vehiclesRoutes } from "./routes/vehicles.routes.js";
 
 export async function buildApp() {
-  const app = Fastify({ loggerInstance: logger });
+  // Behind Railway's proxy, request.ip must be the client's (not the proxy's) for the login limits: trust exactly one proxy, so the address
+  // is the one that proxy appended to X-Forwarded-For and a client cannot pick its own by sending an X-Forwarded-For of its own.
+  // (The function form is on purpose: in Fastify 5 a bare number does not behave as "n proxies".)
+  const app = Fastify({ loggerInstance: logger, trustProxy: (_address, hop) => hop < 1 });
+
+  // The API only answers JSON to our own front-ends: no sniffing, no framing, no referrer leaks, HTTPS only.
+  app.addHook("onSend", async (_request, reply) => {
+    void reply.headers({
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "no-referrer",
+      "Strict-Transport-Security": "max-age=15552000; includeSubDomains",
+    });
+  });
 
   const corsOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim());
   // Without an explicit `methods` list, @fastify/cors falls back to a default that

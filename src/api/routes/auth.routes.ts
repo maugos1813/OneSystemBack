@@ -4,6 +4,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { logoSchema } from "../../services/orgLogo.js";
 import { authenticate, getCurrentUser, registerOrganizationWithOwner } from "../../services/auth.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+import { rateLimitLogin, rateLimitRegister } from "../middlewares/loginRateLimit.js";
 
 const registerSchema = z.object({
   orgName: z.string().min(2).max(200),
@@ -26,6 +27,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/auth/register",
     {
+      preHandler: rateLimitRegister,
       schema: {
         tags: ["Auth"],
         summary: "Crear una organización nueva con su primer usuario (owner)",
@@ -54,6 +56,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post(
     "/auth/login",
     {
+      preHandler: rateLimitLogin,
       schema: {
         tags: ["Auth"],
         summary: "Iniciar sesión y obtener un JWT",
