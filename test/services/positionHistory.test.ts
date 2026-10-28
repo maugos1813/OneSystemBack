@@ -9,7 +9,6 @@ vi.mock("../../src/db/client.js", async () => {
   const pg = new PGlite();
   return { db: drizzle(pg, { schema }), pool: {}, __pg: pg };
 });
-vi.mock("../../src/services/tollDetection.service.js", () => ({ detectTollPassages: async () => undefined }));
 
 const clientModule = (await import("../../src/db/client.js")) as unknown as { db: ReturnType<typeof drizzle>; __pg: PGlite };
 const position = await import("../../src/services/position.service.js");

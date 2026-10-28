@@ -7,18 +7,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
  * they stay in the table (they carry voltage, signal, alarms) but are never shown as a place.
  */
 
-const harness = vi.hoisted(() => ({ tollCalls: [] as unknown[][] }));
-
 vi.mock("../../src/db/client.js", async () => {
   const schema = await import("../../src/db/schema/index.js");
   const pg = new PGlite();
   return { db: drizzle(pg, { schema }), pool: {}, __pg: pg };
 });
-vi.mock("../../src/services/tollDetection.service.js", () => ({
-  detectTollPassages: async (...args: unknown[]) => {
-    harness.tollCalls.push(args);
-  },
-}));
 
 const clientModule = (await import("../../src/db/client.js")) as unknown as { db: ReturnType<typeof drizzle>; __pg: PGlite };
 const position = await import("../../src/services/position.service.js");
@@ -61,7 +54,6 @@ afterAll(async () => {
 beforeEach(async () => {
   await pg.exec("DELETE FROM positions; DELETE FROM device_events; DELETE FROM vehicles; DELETE FROM devices;");
   await pg.exec(`INSERT INTO devices VALUES ('${DEVICE}'); INSERT INTO vehicles VALUES ('${VEHICLE}', '${ORG}', 'VAN-1', null, null, '${DEVICE}');`);
-  harness.tollCalls.length = 0;
 });
 
 async function report(ts: Date, lat: number, lng: number, extra: { speed?: number; io?: Record<string, number>; angle?: number } = {}) {
@@ -203,12 +195,9 @@ describe("storing reports", () => {
     io: { eventId, elements: new Map<number, number>([[66, 12462]]) },
   });
 
-  it("stores every report, but only hands the ones with a fix to toll detection", async () => {
+  it("stores every report, with or without a fix", async () => {
     await position.storeAvlRecords(DEVICE, [record(at(0), 0, 0), record(at(1), 45.1, 9.1), record(at(2), 0, 0)]);
     expect(await db.select().from(positions)).toHaveLength(3);
-    expect(harness.tollCalls).toHaveLength(1);
-    const passed = harness.tollCalls[0]![1] as Array<{ lat: number }>;
-    expect(passed.map((r) => r.lat)).toEqual([45.1]);
   });
 
   it("still records an alarm event that arrives with no fix", async () => {

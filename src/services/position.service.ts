@@ -5,7 +5,6 @@ import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { serializeIoElements } from "../tcp-server/codec8/ioSerialize.js";
 import type { AvlRecord } from "../tcp-server/codec8/types.js";
 import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, findTrackingGaps, TRACKING_GAP_EVENT } from "./deviceAlarms.js";
-import { detectTollPassages } from "./tollDetection.service.js";
 
 const EVENT_AVL_IDS: ReadonlySet<number> = new Set([
   AVL_ID.IGNITION,
@@ -67,17 +66,6 @@ export async function storeAvlRecords(deviceId: string, records: AvlRecord[]): P
       await tx.insert(deviceEvents).values([...eventRows, ...gapRows]);
     }
   });
-
-  // Not awaited: the device's ack must not wait on toll detection (which never throws).
-  void detectTollPassages(
-    deviceId,
-    records.filter((record) => hasFix({ lat: record.gps.latitude, lng: record.gps.longitude })).map((record) => ({
-      lat: record.gps.latitude,
-      lng: record.gps.longitude,
-      ts: record.timestamp,
-      speed: record.gps.speed,
-    })),
-  );
 }
 
 export function eventTypeFromAvlId(avlId: number): string {

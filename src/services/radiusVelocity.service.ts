@@ -5,7 +5,6 @@ import { db } from "../db/client.js";
 import { deviceEvents, devices, positions, vehicles } from "../db/schema/index.js";
 import { publishPosition } from "../realtime/gateway.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
-import { detectTollPassages } from "./tollDetection.service.js";
 
 /**
  * Syncs vehicles tracked by the third-party Radius Velocity ("Kinesis") telematics
@@ -182,8 +181,6 @@ async function syncDevicePosition(orgId: string, deviceId: string, rv: RvDevice)
   }
 
   await db.update(devices).set({ lastSeenAt: ts }).where(eq(devices.id, deviceId));
-
-  void detectTollPassages(deviceId, [{ lat: rv.lat, lng: rv.lon, ts, speed: Math.round(toKmh(rv.speed, rv.speed_measure_text)) }]);
 
   if (inserted) publishPosition(orgId, deviceId, inserted);
 }
