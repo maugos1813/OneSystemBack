@@ -6,6 +6,7 @@ import {
   deleteBeacon,
   DriverBeaconError,
   getVehicleDriver,
+  listBeaconsByVehicle,
   listDetectedBeacons,
   listRegisteredBeacons,
   renameBeacon,
@@ -32,6 +33,7 @@ const createSchema = z
 const renameSchema = z.object({ driverName: z.string().trim().min(1).max(100) });
 const idParams = z.object({ id: z.string().uuid() });
 const detectedQuery = z.object({ hours: z.coerce.number().int().min(1).max(72).default(24) });
+const byVehicleQuery = z.object({ hours: z.coerce.number().int().min(1).max(720).default(24) });
 const driverQuery = z.object({ from: z.coerce.date().optional(), to: z.coerce.date().optional() });
 
 async function requireOrgWideAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -68,6 +70,24 @@ export async function driverBeaconsRoutes(app: FastifyInstance): Promise<void> {
       const query = detectedQuery.safeParse(request.query);
       if (!query.success) return reply.code(400).send({ error: query.error.flatten() });
       return listDetectedBeacons(request.user.orgId, query.data.hours);
+    },
+  );
+
+  app.get(
+    "/driver-beacons/by-vehicle",
+    {
+      preHandler: admin,
+      schema: {
+        tags: ["Choferes"],
+        summary: "Por vehículo con GPS Teltonika: las balizas que oyó, con el chofer de cada una (owner/admin)",
+        security: AUTH,
+        querystring: zodToJsonSchema(byVehicleQuery),
+      },
+    },
+    async (request, reply) => {
+      const query = byVehicleQuery.safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: query.error.flatten() });
+      return listBeaconsByVehicle(request.user.orgId, query.data.hours);
     },
   );
 

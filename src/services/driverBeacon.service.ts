@@ -1,8 +1,8 @@
 import { and, asc, between, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { driverBeacons, positions, vehicles } from "../db/schema/index.js";
+import { devices, driverBeacons, positions, vehicles } from "../db/schema/index.js";
 import { BEACON_ID_PATTERN, beaconIdFromMac, parseBeaconPayload, type BeaconReading } from "./beaconParser.js";
-import { identifyDrivers, type DriverCandidate, type Scan } from "./driverIdentification.js";
+import { identifyDrivers, MOVING_KMH, type DriverCandidate, type Scan } from "./driverIdentification.js";
 import { getVehicleForOrg } from "./vehicle.service.js";
 
 export class DriverBeaconError extends Error {
@@ -112,6 +112,91 @@ export async function listDetectedBeacons(orgId: string, hours: number, now: Dat
 }
 
 /** `beaconId` as the trackers report it, or `mac` as printed on an EYE Beacon's label (one of the two). */
+export interface BeaconInVehicle {
+  beaconId: string;
+  /** Driver the beacon is registered to, null while it is not registered. */
+  driverName: string | null;
+  registeredId: string | null;
+  firstSeen: string;
+  lastSeen: string;
+  /** Beacon reports it appeared in, and how many of them were taken while the vehicle was moving. */
+  sightings: number;
+  movingSightings: number;
+  /** Mean RSSI in dBm: about -50 to -70 at arm's length, -90 and below is far away. */
+  avgRssi: number | null;
+}
+
+export interface VehicleBeacons {
+  vehicle: VehicleRef & { model: string };
+  /** The last beacon report of its tracker in the period (even one with no beacons in it); null if there was none. */
+  lastReport: string | null;
+  beacons: BeaconInVehicle[];
+}
+
+/**
+ * Per vehicle with a Teltonika tracker (the only ones that listen for beacons): which beacons it heard in the last
+ * `hours` hours, the named ones (drivers) first. A beacon heard only while the vehicle sits parked may belong to a
+ * driver of another vehicle nearby, which is why moving reports are counted apart.
+ */
+export async function listBeaconsByVehicle(orgId: string, hours: number, now: Date = new Date()): Promise<VehicleBeacons[]> {
+  const { scans } = await loadScans(orgId, new Date(now.getTime() - hours * 3_600_000), now);
+  const registered = new Map((await listRegisteredBeacons(orgId)).map((b) => [b.beaconId, b]));
+  const trackers = await db
+    .select({ id: vehicles.id, name: vehicles.name, plate: vehicles.plate, model: devices.model })
+    .from(vehicles)
+    .innerJoin(devices, eq(devices.id, vehicles.deviceId))
+    .where(and(eq(vehicles.orgId, orgId), eq(devices.source, "teltonika")));
+
+  interface Acc {
+    first: number;
+    last: number;
+    n: number;
+    moving: number;
+    rssis: number[];
+  }
+  const byVehicle = new Map<string, { lastReport: number; beacons: Map<string, Acc> }>();
+  for (const scan of scans) {
+    const entry = byVehicle.get(scan.vehicleId) ?? { lastReport: 0, beacons: new Map<string, Acc>() };
+    entry.lastReport = Math.max(entry.lastReport, scan.ts);
+    for (const b of scan.beacons) {
+      const acc = entry.beacons.get(b.id) ?? { first: scan.ts, last: scan.ts, n: 0, moving: 0, rssis: [] };
+      acc.first = Math.min(acc.first, scan.ts);
+      acc.last = Math.max(acc.last, scan.ts);
+      acc.n += 1;
+      if (scan.speedKmh >= MOVING_KMH) acc.moving += 1;
+      if (b.rssi !== null) acc.rssis.push(b.rssi);
+      entry.beacons.set(b.id, acc);
+    }
+    byVehicle.set(scan.vehicleId, entry);
+  }
+
+  return trackers
+    .map((vehicle): VehicleBeacons => {
+      const entry = byVehicle.get(vehicle.id);
+      const beacons = [...(entry?.beacons ?? [])].map(([beaconId, a]): BeaconInVehicle => {
+        const reg = registered.get(beaconId);
+        return {
+          beaconId,
+          driverName: reg?.driverName ?? null,
+          registeredId: reg?.id ?? null,
+          firstSeen: new Date(a.first).toISOString(),
+          lastSeen: new Date(a.last).toISOString(),
+          sightings: a.n,
+          movingSightings: a.moving,
+          avgRssi: a.rssis.length > 0 ? Math.round((a.rssis.reduce((x, y) => x + y, 0) / a.rssis.length) * 10) / 10 : null,
+        };
+      });
+      beacons.sort(
+        (a, b) =>
+          Number(b.driverName !== null) - Number(a.driverName !== null) ||
+          b.movingSightings - a.movingSightings ||
+          (b.avgRssi ?? -127) - (a.avgRssi ?? -127),
+      );
+      return { vehicle, lastReport: entry ? new Date(entry.lastReport).toISOString() : null, beacons };
+    })
+    .sort((a, b) => a.vehicle.name.localeCompare(b.vehicle.name));
+}
+
 export async function createBeacon(orgId: string, input: { beaconId?: string; mac?: string; driverName: string }) {
   const beaconId = input.mac !== undefined ? beaconIdFromMac(input.mac) : (input.beaconId ?? "").trim().toLowerCase();
   if (input.mac !== undefined && !beaconId) throw new DriverBeaconError(400, "MAC inválida: son 12 caracteres hexadecimales, como 7C:D9:F4:0B:39:E3");

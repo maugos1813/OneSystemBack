@@ -104,6 +104,31 @@ describe("driver beacons", () => {
     expect((await call("POST", "/driver-beacons", as("owner", null), { driverName: "X" })).statusCode).toBe(400);
   });
 
+  it("lists, per vehicle with a Teltonika tracker, the drivers heard in it and the unnamed beacons apart", async () => {
+    await call("POST", "/driver-beacons", as("owner", null), { beaconId: MARCO, driverName: "Marco Rossi" });
+    const res = await call("GET", "/driver-beacons/by-vehicle?hours=72", as("owner", null));
+    expect(res.statusCode).toBe(200);
+    const list = res.json() as Array<{
+      vehicle: { id: string; name: string; model: string };
+      lastReport: string | null;
+      beacons: Array<{ beaconId: string; driverName: string | null; sightings: number; movingSightings: number; avgRssi: number | null }>;
+    }>;
+    expect(list.map((v) => v.vehicle.name)).toEqual(["DHL van", "Piazza van"]);
+    const dhl = list[0]!;
+    expect(dhl.beacons).toHaveLength(1);
+    expect(dhl.beacons[0]).toMatchObject({ beaconId: MARCO, driverName: "Marco Rossi", sightings: 40, movingSightings: 40, avgRssi: -62 });
+    expect(dhl.lastReport).not.toBeNull();
+    // a vehicle whose tracker heard nothing is still listed, with nothing in it
+    expect(list[1]).toMatchObject({ beacons: [], lastReport: null });
+  });
+
+  it("only owner/admin of an organization-wide account may read the per-vehicle list", async () => {
+    expect((await call("GET", "/driver-beacons/by-vehicle", as("viewer", null))).statusCode).toBe(403);
+    expect((await call("GET", "/driver-beacons/by-vehicle", as("admin", "DHL"))).statusCode).toBe(403);
+    expect((await call("GET", "/driver-beacons/by-vehicle?hours=9999", as("owner", null))).statusCode).toBe(400);
+    expect((await call("GET", "/driver-beacons/by-vehicle", {})).statusCode).toBe(401);
+  });
+
   it("refuses a malformed beacon id", async () => {
     expect((await call("POST", "/driver-beacons", as("owner", null), { beaconId: "not a beacon", driverName: "X" })).statusCode).toBe(400);
   });
