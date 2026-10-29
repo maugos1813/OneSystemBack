@@ -1,7 +1,7 @@
 import { and, asc, between, eq, isNotNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { driverBeacons, positions, vehicles } from "../db/schema/index.js";
-import { BEACON_ID_PATTERN, parseBeaconPayload, type BeaconReading } from "./beaconParser.js";
+import { BEACON_ID_PATTERN, beaconIdFromMac, parseBeaconPayload, type BeaconReading } from "./beaconParser.js";
 import { identifyDrivers, type DriverCandidate, type Scan } from "./driverIdentification.js";
 import { getVehicleForOrg } from "./vehicle.service.js";
 
@@ -111,9 +111,11 @@ export async function listDetectedBeacons(orgId: string, hours: number, now: Dat
     .sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
 }
 
-export async function createBeacon(orgId: string, input: { beaconId: string; driverName: string }) {
-  const beaconId = input.beaconId.trim().toLowerCase();
-  if (!BEACON_ID_PATTERN.test(beaconId)) throw new DriverBeaconError(400, "Identificador de baliza inválido");
+/** `beaconId` as the trackers report it, or `mac` as printed on an EYE Beacon's label (one of the two). */
+export async function createBeacon(orgId: string, input: { beaconId?: string; mac?: string; driverName: string }) {
+  const beaconId = input.mac !== undefined ? beaconIdFromMac(input.mac) : (input.beaconId ?? "").trim().toLowerCase();
+  if (input.mac !== undefined && !beaconId) throw new DriverBeaconError(400, "MAC inválida: son 12 caracteres hexadecimales, como 7C:D9:F4:0B:39:E3");
+  if (!beaconId || !BEACON_ID_PATTERN.test(beaconId)) throw new DriverBeaconError(400, "Identificador de baliza inválido");
   const [row] = await db
     .insert(driverBeacons)
     .values({ orgId, beaconId, driverName: input.driverName.trim() })

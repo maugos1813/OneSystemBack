@@ -58,3 +58,12 @@ export function parseBeaconPayload(hex: string): BeaconReading[] {
   }
   return readings;
 }
+
+/** Every EYE Beacon leaves the factory with this namespace and its own MAC as the Eddystone instance. */
+export const EYE_DEFAULT_NAMESPACE = "00000000000000000000";
+
+/** The key of an EYE Beacon still on its factory identity, from the MAC printed on its label; null if it is not a MAC. */
+export function beaconIdFromMac(mac: string): string | null {
+  const hex = mac.replace(/[:\-\s]/g, "").toLowerCase();
+  return /^[0-9a-f]{12}$/.test(hex) ? `eddystone:${EYE_DEFAULT_NAMESPACE}-${hex}` : null;
+}

@@ -90,6 +90,20 @@ describe("driver beacons", () => {
     expect(other.json()).toMatchObject({ driver: null, confidence: null });
   });
 
+  it("registers an EYE Beacon from the MAC on its label, in any common spelling", async () => {
+    const created = await call("POST", "/driver-beacons", as("owner", null), { mac: "7C:D9:F4:0B:39:E3", driverName: "Luca Bianchi" });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ beaconId: "eddystone:00000000000000000000-7cd9f40b39e3", driverName: "Luca Bianchi" });
+    expect((await call("POST", "/driver-beacons", as("owner", null), { mac: "7cd9f40b39e3", driverName: "Otro" })).statusCode).toBe(409);
+    expect((await call("POST", "/driver-beacons", as("owner", null), { mac: "7CD9-F40B-39E4", driverName: "Anna" })).statusCode).toBe(201);
+  });
+
+  it("refuses a bad MAC, and a request with both or neither identifier", async () => {
+    expect((await call("POST", "/driver-beacons", as("owner", null), { mac: "7CD9F40B39", driverName: "X" })).statusCode).toBe(400);
+    expect((await call("POST", "/driver-beacons", as("owner", null), { mac: "7CD9F40B39E5", beaconId: MARCO, driverName: "X" })).statusCode).toBe(400);
+    expect((await call("POST", "/driver-beacons", as("owner", null), { driverName: "X" })).statusCode).toBe(400);
+  });
+
   it("refuses a malformed beacon id", async () => {
     expect((await call("POST", "/driver-beacons", as("owner", null), { beaconId: "not a beacon", driverName: "X" })).statusCode).toBe(400);
   });
