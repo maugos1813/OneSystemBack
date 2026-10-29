@@ -5,6 +5,7 @@ import { organizations, users, type Device, type Geofence, type Position, type V
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { localized, toLanguage, type Localized } from "./i18n.js";
 import { listGeofencesForOrg } from "./geofence.service.js";
+import { isInsidePolygonPath } from "./geofenceGeometry.js";
 import { listDevicesForOrg } from "./device.service.js";
 import { getLatestAlarmEvents, getLatestPosition, getLatestReading } from "./position.service.js";
 import {
@@ -87,20 +88,6 @@ function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: num
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-/** Even-odd (ray-casting) point-in-ring test — lng as x, lat as y. */
-function pointInRing(point: { lat: number; lng: number }, ring: { lat: number; lng: number }[]): boolean {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i]!.lng;
-    const yi = ring[i]!.lat;
-    const xj = ring[j]!.lng;
-    const yj = ring[j]!.lat;
-    const intersect = yi > point.lat !== yj > point.lat && point.lng < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
 /**
  * Handles both shapes. For a polygon, XORing the even-odd result across every ring
  * correctly covers both a hole (an oppositely-wound nested ring) and disjoint separate
@@ -108,10 +95,7 @@ function pointInRing(point: { lat: number; lng: number }, ring: { lat: number; l
  */
 function isInsideGeofence(position: { lat: number; lng: number }, gf: Geofence): boolean {
   if (gf.type === "polygon") {
-    if (!gf.path) return false;
-    let inside = false;
-    for (const ring of gf.path) if (pointInRing(position, ring)) inside = !inside;
-    return inside;
+    return gf.path ? isInsidePolygonPath(position, gf.path) : false;
   }
   if (gf.lat == null || gf.lng == null || gf.radiusMeters == null) return false;
   return haversineKm(position, { lat: gf.lat, lng: gf.lng }) * 1000 <= gf.radiusMeters;
