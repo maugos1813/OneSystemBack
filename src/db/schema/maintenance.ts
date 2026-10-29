@@ -25,6 +25,9 @@ export const maintenancePlans = pgTable(
     intervalMonths: integer("interval_months"),
     lastDoneAt: timestamp("last_done_at", { withTimezone: true }),
     lastDoneKm: integer("last_done_km"),
+    /** Km driven since the last service that the GPS count could not see (the service was before it started counting,
+     * or the person corrected it against the dashboard). Added to the GPS kilometres; 0 when there is nothing to add. */
+    kmAdjust: integer("km_adjust").notNull().default(0),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

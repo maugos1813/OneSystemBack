@@ -4,6 +4,7 @@ import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { db } from "./db/client.js";
 import { startAlertScheduler } from "./jobs/alertScheduler.js";
+import { startDailyKmScheduler } from "./jobs/dailyKmScheduler.js";
 import { startRadiusVelocityScheduler } from "./jobs/radiusVelocityScheduler.js";
 import { publishPosition } from "./realtime/gateway.js";
 import { dispatchPendingCommands, recordCommandResponse } from "./services/deviceCommand.service.js";
@@ -24,6 +25,7 @@ async function main() {
   logger.info({ enabled: isPushConfigured() }, "push notifications (FIREBASE_SERVICE_ACCOUNT_JSON)");
   startAlertScheduler();
   startRadiusVelocityScheduler();
+  startDailyKmScheduler();
 
   await startTcpServer({
     onIdentify: async (imei) => {

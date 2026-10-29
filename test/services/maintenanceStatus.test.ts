@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, computePlanStatus, trackerOdometerKm } from "../../src/services/maintenanceStatus.js";
+import { addMonths, computePlanStatus, oemOdometerKm, trackerOdometerKm } from "../../src/services/maintenanceStatus.js";
 import { maintenanceAlertMessage } from "../../src/services/maintenance.service.js";
 
 const NOW = new Date("2026-10-17T12:00:00Z");
@@ -24,21 +24,25 @@ describe("computePlanStatus by km", () => {
     expect(s.usedFraction).toBeCloseTo(5000 / 15000);
   });
 
-  it("is soon in the last 10 % of the interval (1 500 km here)", () => {
-    expect(computePlanStatus(plan, 93499, NOW).state).toBe("ok");
-    expect(computePlanStatus(plan, 93500, NOW).state).toBe("soon");
-    expect(computePlanStatus(plan, 94999, NOW).state).toBe("soon");
+  it("turns orange from 40 % left and red below 20 % left (6 000 and 3 000 km on a 15 000 km interval)", () => {
+    expect(computePlanStatus(plan, 88999, NOW).state).toBe("ok"); // 6 001 left
+    expect(computePlanStatus(plan, 89000, NOW).state).toBe("soon"); // 6 000 left
+    expect(computePlanStatus(plan, 92000, NOW).state).toBe("soon"); // 3 000 left, exactly 20 %
+    expect(computePlanStatus(plan, 92001, NOW).state).toBe("due"); // 2 999 left
+  });
+
+  it("on a 20 000 km service: orange with 8 000 km left, red with 3 999 or fewer", () => {
+    const service = { intervalKm: 20000, intervalMonths: null, lastDoneAt: null, lastDoneKm: 100000 };
+    expect(computePlanStatus(service, 111999, NOW)).toMatchObject({ state: "ok", kmRemaining: 8001 });
+    expect(computePlanStatus(service, 112000, NOW)).toMatchObject({ state: "soon", kmRemaining: 8000 });
+    expect(computePlanStatus(service, 116000, NOW)).toMatchObject({ state: "soon", kmRemaining: 4000 });
+    expect(computePlanStatus(service, 116001, NOW)).toMatchObject({ state: "due", kmRemaining: 3999 });
+    expect(computePlanStatus(service, 119999, NOW)).toMatchObject({ state: "due", kmRemaining: 1 });
   });
 
   it("is overdue only once the due km is passed, not at it", () => {
-    expect(computePlanStatus(plan, 95000, NOW)).toMatchObject({ state: "soon", kmRemaining: 0 });
+    expect(computePlanStatus(plan, 95000, NOW)).toMatchObject({ state: "due", kmRemaining: 0 });
     expect(computePlanStatus(plan, 95001, NOW)).toMatchObject({ state: "overdue", kmRemaining: -1 });
-  });
-
-  it("uses a 500 km floor for the soon window on short intervals", () => {
-    const short = { intervalKm: 2000, intervalMonths: null, lastDoneAt: null, lastDoneKm: 0 };
-    expect(computePlanStatus(short, 1499, NOW).state).toBe("ok"); // 10 % would be 200 km
-    expect(computePlanStatus(short, 1500, NOW).state).toBe("soon");
   });
 
   it("is unknown without an odometer reading or a baseline, never a false ok", () => {
@@ -57,9 +61,11 @@ describe("computePlanStatus by time", () => {
     expect(s.state).toBe("ok");
   });
 
-  it("is soon within 30 days and overdue after the date", () => {
+  it("is orange within 30 days, red within 7, and overdue after the date", () => {
     expect(computePlanStatus(plan, null, new Date("2026-10-18T12:00:00Z")).state).toBe("soon"); // 30 days left
-    expect(computePlanStatus(plan, null, new Date("2026-11-17T11:00:00Z")).state).toBe("soon"); // due today
+    expect(computePlanStatus(plan, null, new Date("2026-11-09T12:00:00Z")).state).toBe("soon"); // 8 days left
+    expect(computePlanStatus(plan, null, new Date("2026-11-10T12:00:00Z")).state).toBe("due"); // 7 days left
+    expect(computePlanStatus(plan, null, new Date("2026-11-17T11:00:00Z")).state).toBe("due"); // due today
     expect(computePlanStatus(plan, null, new Date("2026-11-17T13:00:00Z"))).toMatchObject({ state: "overdue", daysRemaining: -1 });
   });
 
@@ -108,7 +114,28 @@ describe("trackerOdometerKm", () => {
   });
 });
 
+describe("oemOdometerKm", () => {
+  it("is the car's own odometer, and nothing else: not the tracker's distance counter", () => {
+    expect(oemOdometerKm({ "389": 85123, "16": 3200000 })).toBe(85123);
+    expect(oemOdometerKm({ "16": 3200000 })).toBeNull();
+    expect(oemOdometerKm({ "389": 0 })).toBeNull(); // the device reads the field but the car gave no mileage
+    expect(oemOdometerKm({ "389": "x" })).toBeNull();
+    expect(oemOdometerKm(null)).toBeNull();
+  });
+});
+
 describe("maintenanceAlertMessage", () => {
+  it("says what is left when the service is about to be due (red) too", () => {
+    const due = maintenanceAlertMessage(
+      "VAN-1",
+      "Tagliando",
+      { state: "due", dueKm: 150000, dueDate: null, kmRemaining: 2500, daysRemaining: null, usedFraction: 0.87 },
+      "it",
+    );
+    expect(due).toContain("manutenzione in scadenza — Tagliando");
+    expect(due).toContain("mancano");
+  });
+
   it("says overdue or what is left", () => {
     const base = { dueKm: 95000, dueDate: null };
     expect(maintenanceAlertMessage("VAN-1", "Aceite", { ...base, state: "overdue", kmRemaining: -10, daysRemaining: null, usedFraction: 1.1 })).toBe(

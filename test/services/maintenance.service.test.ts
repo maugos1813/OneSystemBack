@@ -4,8 +4,9 @@ import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * The real queries of the maintenance service against an in-memory Postgres, with the real
- * migration SQL for the new tables. Only the tracker's latest position is faked.
+ * The real queries of the maintenance service against an in-memory Postgres, with the real migration SQL for the
+ * tables. Only the tracker's latest position is faked. A car whose odometer is read through OBD (ID 389) is measured
+ * against it; any other is counted from the GPS days in vehicle_daily_km.
  */
 
 const harness = vi.hoisted(() => ({ ioData: {} as Record<string, number | string>, hasPosition: true }));
@@ -23,7 +24,7 @@ vi.mock("../../src/services/position.service.js", () => ({
 const clientModule = (await import("../../src/db/client.js")) as unknown as { db: ReturnType<typeof drizzle>; __pg: PGlite };
 const service = await import("../../src/services/maintenance.service.js");
 const { db } = clientModule;
-const { maintenancePlans, maintenanceRecords, vehicles } = await import("../../src/db/schema/index.js");
+const { maintenancePlans, maintenanceRecords, vehicles, vehicleDailyKm } = await import("../../src/db/schema/index.js");
 const { eq } = await import("drizzle-orm");
 
 const ORG = "00000000-0000-0000-0000-00000000000a";
@@ -45,11 +46,13 @@ beforeAll(async () => {
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
-  const migration = readFileSync(new URL("../../drizzle/0017_maintenance.sql", import.meta.url), "utf8");
-  for (const statement of migration.split("--> statement-breakpoint")) {
-    // the vehicles column is part of the stub table above
-    if (statement.includes('ALTER TABLE "vehicles"')) continue;
-    await pg.exec(statement);
+  for (const file of ["0017_maintenance.sql", "0029_vehicle_daily_km.sql"]) {
+    const migration = readFileSync(new URL(`../../drizzle/${file}`, import.meta.url), "utf8");
+    for (const statement of migration.split("--> statement-breakpoint")) {
+      // the vehicles column is part of the stub table above
+      if (statement.includes('ALTER TABLE "vehicles"')) continue;
+      await pg.exec(statement);
+    }
   }
 });
 
@@ -58,6 +61,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await db.delete(vehicleDailyKm);
   await db.delete(maintenanceRecords);
   await db.delete(maintenancePlans);
   await db.delete(vehicles);
@@ -68,10 +72,11 @@ beforeEach(async () => {
     { id: V_OTHER, orgId: OTHER_ORG, name: "OTHER", fleetGroup: null, deviceId: null },
   ]);
   harness.hasPosition = true;
-  harness.ioData = { "16": 8_000_000 }; // tracker counted 8 000 km
+  harness.ioData = { "389": 8000 }; // the car's own odometer, read through OBD: 8 000 km
 });
 
 const OIL = { name: "Cambio de aceite", intervalKm: 15000, intervalMonths: 12 };
+const day = (vehicleId: string, date: string, km: number) => db.insert(vehicleDailyKm).values({ vehicleId, day: date, km });
 
 describe("createPlan", () => {
   it("starts counting from today at the vehicle's current odometer", async () => {
@@ -93,11 +98,10 @@ describe("createPlan", () => {
     await expect(service.createPlan(ORG, null, V_DHL, { name: "Solo fecha", intervalMonths: 24 }, NOW)).resolves.toBeDefined();
   });
 
-  it("keeps a baseline of null km when the vehicle has no odometer, and still tracks by date", async () => {
+  it("counts from the GPS when the vehicle's odometer is not read: nothing driven yet, the whole interval left", async () => {
     const plan = await service.createPlan(ORG, null, V_UNI, OIL, NOW);
-    expect(plan.lastDoneKm).toBeNull();
-    expect(plan.status.kmRemaining).toBeNull();
-    expect(plan.status.state).toBe("ok"); // months still count
+    expect(plan).toMatchObject({ kmSource: "gps", lastDoneKm: null, kmSince: 0, dashboardKm: null });
+    expect(plan.status).toMatchObject({ state: "ok", kmRemaining: 15000 });
   });
 
   it("does not exist for a vehicle of another organization or outside the área", async () => {
@@ -112,9 +116,9 @@ describe("listMaintenance", () => {
     await service.createPlan(ORG, null, V_DHL, { name: "Frenos", intervalKm: 30000 }, NOW);
     const list = await service.listMaintenance(ORG, null, NOW);
     expect(list.map((v) => v.name)).toEqual(["VAN-1", "VAN-2"]);
-    expect(list[0]).toMatchObject({ trackerKm: 8000, offsetKm: 0, odometerKm: 8000 });
+    expect(list[0]).toMatchObject({ kmSource: "obd", trackerKm: 8000, offsetKm: 0, odometerKm: 8000 });
     expect(list[0]!.plans.map((p) => p.name)).toEqual(["Cambio de aceite", "Frenos"]);
-    expect(list[1]).toMatchObject({ trackerKm: null, odometerKm: null, plans: [] });
+    expect(list[1]).toMatchObject({ kmSource: "gps", trackerKm: null, odometerKm: null, gpsKmTotal: 0, gpsCoverageFrom: null, plans: [] });
   });
 
   it("only shows the caller's área, and never another organization's vehicles", async () => {
@@ -125,7 +129,7 @@ describe("listMaintenance", () => {
 
   it("flags a plan as overdue when the tracker has run past the due km", async () => {
     await service.createPlan(ORG, null, V_DHL, OIL, NOW);
-    harness.ioData = { "16": 24_000_000 };
+    harness.ioData = { "389": 24000 };
     const [van1] = await service.listMaintenance(ORG, null, NOW);
     expect(van1!.plans[0]!.status).toMatchObject({ state: "overdue", kmRemaining: -1000 });
   });
@@ -134,7 +138,7 @@ describe("listMaintenance", () => {
 describe("registerService", () => {
   it("moves the baseline to now at the current odometer and keeps the history", async () => {
     const plan = await service.createPlan(ORG, null, V_DHL, OIL, new Date("2026-01-01T00:00:00Z"));
-    harness.ioData = { "16": 23_000_000 };
+    harness.ioData = { "389": 23000 };
     const after = await service.registerService(ORG, null, plan.id, { notes: "Olio 5W30" }, NOW);
     expect(after).toMatchObject({ lastDoneKm: 23000, status: { state: "ok", dueKm: 38000 } });
     expect(after.lastDoneAt).toEqual(NOW);
@@ -197,7 +201,7 @@ describe("calibrateOdometer", () => {
     await service.registerService(ORG, null, plan.id, { odometerKm: 7500, doneAt: new Date("2026-10-01T00:00:00Z") }, NOW);
 
     const result = await service.calibrateOdometer(ORG, null, V_DHL, 85_000);
-    expect(result).toEqual({ trackerKm: 8000, offsetKm: 77000, odometerKm: 85000 });
+    expect(result).toEqual({ source: "obd", trackerKm: 8000, offsetKm: 77000, odometerKm: 85000 });
 
     const [van1] = await service.listMaintenance(ORG, null, NOW);
     expect(van1).toMatchObject({ trackerKm: 8000, offsetKm: 77000, odometerKm: 85000 });
@@ -212,14 +216,99 @@ describe("calibrateOdometer", () => {
     expect((await db.select().from(vehicles).where(eq(vehicles.id, V_DHL)))[0]!.odometerOffsetKm).toBe(78000);
   });
 
-  it("refuses when the device has not reported a kilometrage", async () => {
-    await expect(service.calibrateOdometer(ORG, null, V_UNI, 1000)).rejects.toMatchObject({ status: 400 });
-    harness.hasPosition = false;
-    await expect(service.calibrateOdometer(ORG, null, V_DHL, 1000)).rejects.toMatchObject({ status: 400 });
+  it("on a vehicle counted by GPS, adjusts each plan so the dashboard figure is what it reads now", async () => {
+    harness.ioData = {};
+    await day(V_DHL, "2026-10-10", 100);
+    await service.createPlan(ORG, null, V_DHL, { name: "Tagliando", intervalKm: 20000, lastDoneAt: new Date("2026-10-01T10:00:00Z"), lastDoneKm: 130000 }, NOW);
+    const result = await service.calibrateOdometer(ORG, null, V_DHL, 130_400);
+    expect(result).toMatchObject({ source: "gps", trackerKm: null, odometerKm: 130400 });
+    const [van1] = await service.listMaintenance(ORG, null, NOW);
+    expect(van1!.plans[0]).toMatchObject({ kmSince: 400, dashboardKm: 130400 });
+    expect(van1!.plans[0]!.status.kmRemaining).toBe(19600);
+  });
+
+  it("refuses a dashboard reading below the km the plans were last done at", async () => {
+    harness.ioData = {};
+    await service.createPlan(ORG, null, V_DHL, { name: "Tagliando", intervalKm: 20000, lastDoneAt: new Date("2026-10-01T10:00:00Z"), lastDoneKm: 130000 }, NOW);
+    await expect(service.calibrateOdometer(ORG, null, V_DHL, 120_000)).rejects.toMatchObject({ status: 400 });
   });
 
   it("is not reachable for another organization or área", async () => {
     await expect(service.calibrateOdometer(OTHER_ORG, null, V_DHL, 1000)).rejects.toMatchObject({ status: 404 });
     await expect(service.calibrateOdometer(ORG, "UNIVEX", V_DHL, 1000)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("plans counted by GPS", () => {
+  const TAGLIANDO = { name: "Tagliando", intervalKm: 20000 };
+  const DONE = { lastDoneAt: new Date("2026-10-01T15:00:00Z"), lastDoneKm: 130000 };
+
+  beforeEach(async () => {
+    harness.ioData = {}; // no OBD odometer: the GPS counts
+    await day(V_DHL, "2026-09-25", 300); // before the service: not counted
+    await day(V_DHL, "2026-10-01", 80); // the day of the service itself: not counted
+    await day(V_DHL, "2026-10-02", 120.4);
+    await day(V_DHL, "2026-10-03", 200.4);
+  });
+
+  it("counts the km driven from the day after the service, and follows the dashboard from the km it was done at", async () => {
+    const plan = await service.createPlan(ORG, null, V_DHL, { ...TAGLIANDO, ...DONE }, NOW);
+    expect(plan).toMatchObject({ kmSource: "gps", kmSince: 321, dashboardKm: 130321, partialCoverage: false });
+    expect(plan.status).toMatchObject({ state: "ok", dueKm: 150000, kmRemaining: 19679 });
+  });
+
+  it("turns orange with 8 000 km or fewer left and red below 4 000 (3 999 or less), on a 20 000 km service", async () => {
+    const plan = await service.createPlan(ORG, null, V_DHL, { ...TAGLIANDO, ...DONE }, NOW);
+    const stateAfter = async (driven: number) => {
+      await db.delete(vehicleDailyKm);
+      await day(V_DHL, "2026-10-05", driven);
+      return (await service.listMaintenance(ORG, null, NOW))[0]!.plans.find((p) => p.id === plan.id)!.status;
+    };
+    expect(await stateAfter(11_999)).toMatchObject({ state: "ok", kmRemaining: 8001 });
+    expect(await stateAfter(12_000)).toMatchObject({ state: "soon", kmRemaining: 8000 });
+    expect(await stateAfter(16_000)).toMatchObject({ state: "soon", kmRemaining: 4000 });
+    expect(await stateAfter(16_001)).toMatchObject({ state: "due", kmRemaining: 3999 });
+    expect(await stateAfter(20_000)).toMatchObject({ state: "due", kmRemaining: 0 });
+    expect(await stateAfter(20_001)).toMatchObject({ state: "overdue", kmRemaining: -1 });
+  });
+
+  it("says when the service was before the GPS started counting, and a dashboard reading makes up the difference", async () => {
+    const early = { ...TAGLIANDO, lastDoneAt: new Date("2026-08-01T10:00:00Z"), lastDoneKm: 120000 };
+    const plan = await service.createPlan(ORG, null, V_DHL, early, NOW);
+    expect(plan.partialCoverage).toBe(true); // the first day counted is 25/09
+
+    const fixed = await service.updatePlan(ORG, null, plan.id, { dashboardKm: 126_000 }, NOW);
+    expect(fixed).toMatchObject({ kmSince: 6000, dashboardKm: 126000, partialCoverage: false });
+    expect(fixed.status.kmRemaining).toBe(14000);
+  });
+
+  it("registering a service restarts the count from that service", async () => {
+    const plan = await service.createPlan(ORG, null, V_DHL, { ...TAGLIANDO, ...DONE }, NOW);
+    const after = await service.registerService(ORG, null, plan.id, { doneAt: new Date("2026-10-10T09:00:00Z"), odometerKm: 131_000 }, NOW);
+    expect(after).toMatchObject({ lastDoneKm: 131000, kmSince: 0, dashboardKm: 131000 });
+    expect(after.status).toMatchObject({ state: "ok", dueKm: 151000, kmRemaining: 20000 });
+  });
+
+  it("registering a service today with no km uses the dashboard figure it estimates", async () => {
+    const plan = await service.createPlan(ORG, null, V_DHL, { ...TAGLIANDO, ...DONE }, NOW);
+    const after = await service.registerService(ORG, null, plan.id, {}, NOW);
+    expect(after).toMatchObject({ lastDoneKm: 130321, kmSince: 0 });
+  });
+
+  it("changing the baseline of a plan starts its count over", async () => {
+    const plan = await service.createPlan(ORG, null, V_DHL, { ...TAGLIANDO, ...DONE }, NOW);
+    const moved = await service.updatePlan(ORG, null, plan.id, { lastDoneAt: new Date("2026-10-02T15:00:00Z"), lastDoneKm: 130100 }, NOW);
+    expect(moved).toMatchObject({ kmSince: 200, dashboardKm: 130300 });
+  });
+
+  it("needs the km and date of the service to line up with the dashboard", async () => {
+    await expect(service.createPlan(ORG, null, V_DHL, { ...TAGLIANDO, dashboardKm: 130_000 }, NOW)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("the car's own odometer, when read, wins over the GPS count", async () => {
+    harness.ioData = { "389": 134_000 };
+    const plan = await service.createPlan(ORG, null, V_DHL, { ...TAGLIANDO, ...DONE }, NOW);
+    expect(plan).toMatchObject({ kmSource: "obd", kmSince: 4000, dashboardKm: 134000 });
+    expect(plan.status).toMatchObject({ state: "ok", kmRemaining: 16000 });
   });
 });

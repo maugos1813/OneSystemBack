@@ -40,12 +40,19 @@ const planFields = {
   intervalMonths: interval(240),
   lastDoneAt: dateField.nullable().optional(),
   lastDoneKm: km.nullable().optional(),
+  /** What the dashboard reads now: lines the GPS count up with it. */
+  dashboardKm: km.nullable().optional(),
   notes: optionalText(1000),
 };
 
 const createSchema = z.object({ vehicleId: z.string().uuid(), ...planFields });
 const patchSchema = z.object(planFields).partial();
-const recordSchema = z.object({ doneAt: dateField.optional(), odometerKm: km.nullable().optional(), notes: optionalText(1000) });
+const recordSchema = z.object({
+  doneAt: dateField.optional(),
+  odometerKm: km.nullable().optional(),
+  dashboardKm: km.nullable().optional(),
+  notes: optionalText(1000),
+});
 const calibrateSchema = z.object({ dashboardKm: km });
 const idParams = z.object({ id: z.string().uuid() });
 

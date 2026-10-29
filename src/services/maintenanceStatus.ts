@@ -1,6 +1,7 @@
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 
-export type MaintenanceState = "ok" | "soon" | "overdue" | "unknown";
+/** ok = green; soon = orange; due and overdue = red (about to be due, and already past it); unknown = nothing to measure. */
+export type MaintenanceState = "ok" | "soon" | "due" | "overdue" | "unknown";
 
 export interface PlanSchedule {
   intervalKm: number | null;
@@ -22,10 +23,15 @@ export interface PlanStatus {
 }
 
 const DAY_MS = 86_400_000;
-/** "Soon" is the last 10 % of a km interval (never less than 500 km) or the last 30 days. */
-const SOON_KM_SHARE = 0.1;
-const SOON_KM_FLOOR = 500;
+/**
+ * What is left decides the colour. For a km interval it is a share of the interval, so the rule scales: on a 20 000 km
+ * service, orange from 8 000 km left (40 %) and red below 4 000 km (20 %, so 3 999 or less). For a time interval:
+ * orange in the last 30 days and red in the last 7.
+ */
+const SOON_KM_SHARE = 0.4;
+const DUE_KM_SHARE = 0.2;
 const SOON_DAYS = 30;
+const DUE_DAYS = 7;
 
 /** Calendar-correct "same day N months later" (Jan 31 + 1 month is the end of February). */
 export function addMonths(date: Date, months: number): Date {
@@ -48,24 +54,28 @@ export function computePlanStatus(plan: PlanSchedule, currentKm: number | null, 
   let kmRemaining: number | null = null;
   let kmUsed: number | null = null;
   let soonByKm = false;
+  let dueByKm = false;
 
   if (plan.intervalKm && plan.lastDoneKm !== null && currentKm !== null) {
     dueKm = plan.lastDoneKm + plan.intervalKm;
     kmRemaining = dueKm - currentKm;
     kmUsed = (currentKm - plan.lastDoneKm) / plan.intervalKm;
-    soonByKm = kmRemaining <= Math.max(SOON_KM_FLOOR, plan.intervalKm * SOON_KM_SHARE);
+    soonByKm = kmRemaining <= plan.intervalKm * SOON_KM_SHARE;
+    dueByKm = kmRemaining < plan.intervalKm * DUE_KM_SHARE;
   }
 
   let dueDate: Date | null = null;
   let daysRemaining: number | null = null;
   let timeUsed: number | null = null;
   let soonByTime = false;
+  let dueByTime = false;
 
   if (plan.intervalMonths && plan.lastDoneAt) {
     dueDate = addMonths(plan.lastDoneAt, plan.intervalMonths);
     daysRemaining = Math.floor((dueDate.getTime() - now.getTime()) / DAY_MS);
     timeUsed = (now.getTime() - plan.lastDoneAt.getTime()) / (dueDate.getTime() - plan.lastDoneAt.getTime());
     soonByTime = daysRemaining <= SOON_DAYS;
+    dueByTime = daysRemaining <= DUE_DAYS;
   }
 
   const evaluable = kmRemaining !== null || daysRemaining !== null;
@@ -74,7 +84,7 @@ export function computePlanStatus(plan: PlanSchedule, currentKm: number | null, 
   let state: MaintenanceState = "unknown";
   if (evaluable) {
     const overdue = (kmRemaining !== null && kmRemaining < 0) || (daysRemaining !== null && daysRemaining < 0);
-    state = overdue ? "overdue" : soonByKm || soonByTime ? "soon" : "ok";
+    state = overdue ? "overdue" : dueByKm || dueByTime ? "due" : soonByKm || soonByTime ? "soon" : "ok";
   }
 
   return {
@@ -85,6 +95,16 @@ export function computePlanStatus(plan: PlanSchedule, currentKm: number | null, 
     daysRemaining,
     usedFraction: fractions.length > 0 ? Math.max(0, ...fractions) : null,
   };
+}
+
+/**
+ * The car's own odometer, read through OBD (ID 389, km), or null when the device does not report it. It is the one
+ * odometer that is the dashboard's, so plans use it directly; any other vehicle is counted from its GPS route.
+ */
+export function oemOdometerKm(ioData: Record<string, number | string> | null | undefined): number | null {
+  if (!ioData || ioData["389"] === undefined) return null;
+  const oem = Number(ioData["389"]);
+  return Number.isFinite(oem) && oem > 0 ? Math.round(oem) : null;
 }
 
 /**

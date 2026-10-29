@@ -25,8 +25,7 @@ import { documentAlertMessage, documentName, documentStatus } from "./vehicleDoc
 import { resolveModules } from "./modules.js";
 import { getOpenNotification, openNotification, resolveNotification } from "./alertNotification.service.js";
 import { type AlertPreferences, type OrgSettings, type WorkingHours, withDefaults } from "./settings.service.js";
-import { correctedKm, listPlansForOrg, maintenanceAlertMessage } from "./maintenance.service.js";
-import { computePlanStatus, trackerOdometerKm } from "./maintenanceStatus.js";
+import { listPlansForOrg, maintenanceAlertMessage, planStatusesFor } from "./maintenance.service.js";
 import { listVehiclesForOrg } from "./vehicle.service.js";
 
 /** `positions.io_data` is stored as jsonb, which Drizzle infers as `unknown` — this is
@@ -178,10 +177,11 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
   const geofences = settings.alerts.geofenceEnabled ? await listGeofencesForOrg(orgId) : [];
 
   const plans = settings.alerts.maintenanceEnabled ? await listPlansForOrg(orgId) : [];
+  const now = new Date();
+  const planStatus = await planStatusesFor(vehicles, plans, now);
   const documents = settings.alerts.maintenanceEnabled ? await listDocumentsForOrg(orgId) : [];
 
   const collector: AlertEmailItem[] = [];
-  const now = new Date();
 
   // Each alert is tagged with the flota of the vehicle it is about, so it only reaches who may know about it.
   let taggedUpTo = 0;
@@ -200,17 +200,14 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
 
     // Before the device checks: a plan counted in months still matters for a vehicle with no tracker.
     for (const plan of plans.filter((p) => p.vehicleId === vehicle.id)) {
-      const odometerKm = correctedKm(
-        position ? trackerOdometerKm(position.ioData as Record<string, number | string>) : null,
-        vehicle.odometerOffsetKm,
-      );
-      const status = computePlanStatus(plan, odometerKm, now);
+      const status = planStatus.get(plan.id);
+      if (!status) continue;
       await ongoingCondition(
         orgId,
         vehicle.id,
         vehicle.name,
         `maint:${plan.id.slice(0, 8)}`,
-        status.state === "soon" || status.state === "overdue",
+        status.state === "soon" || status.state === "due" || status.state === "overdue",
         localized((lang) => maintenanceAlertMessage(vehicle.name, plan.name, status, lang)),
         collector,
       );

@@ -9,7 +9,8 @@ import {
   type Vehicle,
 } from "../db/schema/index.js";
 import type { Language } from "./i18n.js";
-import { computePlanStatus, trackerOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
+import { addDays, kmAfterDay, listDailyKm, romeDay, type DailyKm } from "./dailyKm.service.js";
+import { computePlanStatus, oemOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
 import { getLatestReading } from "./position.service.js";
 import { getVehicleForOrg, listVehiclesForOrg } from "./vehicle.service.js";
 
@@ -22,6 +23,8 @@ export class MaintenanceError extends Error {
   }
 }
 
+export type KmSource = "obd" | "gps";
+
 export interface PlanView {
   id: string;
   vehicleId: string;
@@ -31,6 +34,14 @@ export interface PlanView {
   lastDoneAt: Date | null;
   lastDoneKm: number | null;
   notes: string | null;
+  /** Where this plan's kilometres come from: the car's own odometer (OBD) or the GPS route counted since the service. */
+  kmSource: KmSource;
+  /** Km driven since the last service, when it can be told. */
+  kmSince: number | null;
+  /** The dashboard reading now, as the last service's km plus what has been driven since. Null when it cannot be told. */
+  dashboardKm: number | null;
+  /** The service was before the GPS started counting for this vehicle, so the km since it are short by that stretch. */
+  partialCoverage: boolean;
   status: PlanStatus;
 }
 
@@ -38,15 +49,72 @@ export interface VehicleMaintenanceView {
   vehicleId: string;
   name: string;
   plate: string | null;
-  /** What the tracker reports, before the offset. Null if this vehicle's device doesn't report it. */
+  kmSource: KmSource;
+  /** The car's own odometer through OBD, before the offset. Null if this vehicle's device doesn't report it. */
   trackerKm: number | null;
   offsetKm: number;
-  /** Dashboard-scale odometer (tracker + offset); what plans are measured against. */
+  /** Dashboard-scale odometer (OBD + offset); what plans are measured against when the vehicle has it. */
   odometerKm: number | null;
+  /** All the km the GPS has counted for this vehicle, and since which day. */
+  gpsKmTotal: number;
+  gpsCoverageFrom: string | null;
   plans: PlanView[];
 }
 
-export function toPlanView(plan: MaintenancePlan, odometerKm: number | null, now: Date): PlanView {
+/** What a vehicle's km are counted from: the car's odometer when the device reads it, otherwise its daily GPS totals. */
+export interface KmContext {
+  /** The OBD odometer with the vehicle's offset applied, or null. */
+  obdKm: number | null;
+  daily: DailyKm[];
+  /** The first day the GPS has a total for. */
+  coverageFrom: string | null;
+}
+
+export interface PlanKm {
+  source: KmSource;
+  /** The km to measure the plan against (see computePlanStatus). */
+  currentKm: number | null;
+  kmSince: number | null;
+  dashboardKm: number | null;
+  partial: boolean;
+}
+
+/**
+ * Where a plan's km stand. With the car's own odometer it is a plain reading. Otherwise it is the GPS km driven on the
+ * days after the service (counting starts the day after) plus the plan's adjustment, on top of the km the service was
+ * done at, so the dashboard figure follows without anyone typing it.
+ */
+export function planKm(plan: Pick<MaintenancePlan, "lastDoneAt" | "lastDoneKm" | "kmAdjust">, ctx: KmContext): PlanKm {
+  if (ctx.obdKm !== null) {
+    return {
+      source: "obd",
+      currentKm: ctx.obdKm,
+      kmSince: plan.lastDoneKm !== null ? ctx.obdKm - plan.lastDoneKm : null,
+      dashboardKm: ctx.obdKm,
+      partial: false,
+    };
+  }
+  if (!plan.lastDoneAt) return { source: "gps", currentKm: null, kmSince: null, dashboardKm: null, partial: false };
+
+  const serviceDay = romeDay(plan.lastDoneAt);
+  const kmSince = Math.round(kmAfterDay(ctx.daily, serviceDay) + plan.kmAdjust);
+  const partial = plan.kmAdjust === 0 && ctx.coverageFrom !== null && addDays(serviceDay, 1) < ctx.coverageFrom;
+  return {
+    source: "gps",
+    currentKm: (plan.lastDoneKm ?? 0) + kmSince,
+    kmSince,
+    dashboardKm: plan.lastDoneKm !== null ? plan.lastDoneKm + kmSince : null,
+    partial,
+  };
+}
+
+function statusFor(plan: MaintenancePlan, km: PlanKm, now: Date): PlanStatus {
+  // Counted by GPS with no km given for the service, the km are "since the service": the baseline is zero.
+  const baseline = km.source === "gps" ? { ...plan, lastDoneKm: plan.lastDoneKm ?? 0 } : plan;
+  return computePlanStatus(baseline, km.currentKm, now);
+}
+
+export function toPlanView(plan: MaintenancePlan, km: PlanKm, now: Date): PlanView {
   return {
     id: plan.id,
     vehicleId: plan.vehicleId,
@@ -56,19 +124,50 @@ export function toPlanView(plan: MaintenancePlan, odometerKm: number | null, now
     lastDoneAt: plan.lastDoneAt,
     lastDoneKm: plan.lastDoneKm,
     notes: plan.notes,
-    status: computePlanStatus(plan, odometerKm, now),
+    kmSource: km.source,
+    kmSince: km.kmSince,
+    dashboardKm: km.dashboardKm,
+    partialCoverage: km.partial,
+    status: statusFor(plan, km, now),
   };
 }
 
-/** The tracker's current odometer reading in km, or null (no device, or it reports none). */
-async function readTrackerKm(vehicle: Pick<Vehicle, "deviceId">): Promise<number | null> {
+/** The car's own odometer reading in km, or null (no device, or it does not read the car's odometer). */
+async function readObdKm(vehicle: Pick<Vehicle, "deviceId">): Promise<number | null> {
   if (!vehicle.deviceId) return null;
   const position = await getLatestReading(vehicle.deviceId);
-  return position ? trackerOdometerKm(position.ioData as Record<string, number | string>) : null;
+  return position ? oemOdometerKm(position.ioData as Record<string, number | string>) : null;
 }
 
 export function correctedKm(trackerKm: number | null, offsetKm: number): number | null {
   return trackerKm === null ? null : Math.max(0, trackerKm + offsetKm);
+}
+
+async function kmContexts(vehicles: Vehicle[]): Promise<Map<string, KmContext & { obdRaw: number | null }>> {
+  const daily = await listDailyKm(vehicles.map((v) => v.id));
+  const entries = await Promise.all(
+    vehicles.map(async (vehicle) => {
+      const obdRaw = await readObdKm(vehicle);
+      const rows = daily.get(vehicle.id) ?? [];
+      return [
+        vehicle.id,
+        { obdRaw, obdKm: correctedKm(obdRaw, vehicle.odometerOffsetKm), daily: rows, coverageFrom: rows[0]?.day ?? null },
+      ] as const;
+    }),
+  );
+  return new Map(entries);
+}
+
+/** Where every plan stands, for the alert evaluator (which walks every organization's plans). */
+export async function planStatusesFor(vehicles: Vehicle[], plans: MaintenancePlan[], now: Date = new Date()): Promise<Map<string, PlanStatus>> {
+  const withPlans = vehicles.filter((v) => plans.some((p) => p.vehicleId === v.id));
+  const contexts = await kmContexts(withPlans);
+  const statuses = new Map<string, PlanStatus>();
+  for (const plan of plans) {
+    const ctx = contexts.get(plan.vehicleId);
+    if (ctx) statuses.set(plan.id, statusFor(plan, planKm(plan, ctx), now));
+  }
+  return statuses;
 }
 
 /** Every vehicle the caller can see, each with its plans and where they stand. */
@@ -94,21 +193,22 @@ export async function listMaintenance(
     )
     .orderBy(asc(maintenancePlans.name));
 
-  const rows = await Promise.all(
-    visible.map(async (vehicle) => {
-      const trackerKm = await readTrackerKm(vehicle);
-      const odometerKm = correctedKm(trackerKm, vehicle.odometerOffsetKm);
-      return {
-        vehicleId: vehicle.id,
-        name: vehicle.name,
-        plate: vehicle.plate,
-        trackerKm,
-        offsetKm: vehicle.odometerOffsetKm,
-        odometerKm,
-        plans: plans.filter((p) => p.vehicleId === vehicle.id).map((p) => toPlanView(p, odometerKm, now)),
-      };
-    }),
-  );
+  const contexts = await kmContexts(visible);
+  const rows = visible.map((vehicle): VehicleMaintenanceView => {
+    const ctx = contexts.get(vehicle.id)!;
+    return {
+      vehicleId: vehicle.id,
+      name: vehicle.name,
+      plate: vehicle.plate,
+      kmSource: ctx.obdKm !== null ? "obd" : "gps",
+      trackerKm: ctx.obdRaw,
+      offsetKm: vehicle.odometerOffsetKm,
+      odometerKm: ctx.obdKm,
+      gpsKmTotal: Math.round(ctx.daily.reduce((sum, d) => sum + d.km, 0)),
+      gpsCoverageFrom: ctx.coverageFrom,
+      plans: plans.filter((p) => p.vehicleId === vehicle.id).map((p) => toPlanView(p, planKm(p, ctx), now)),
+    };
+  });
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -118,6 +218,9 @@ export interface PlanInput {
   intervalMonths?: number | null;
   lastDoneAt?: Date | null;
   lastDoneKm?: number | null;
+  /** What the dashboard reads now, to line the GPS count up with it (when the service was before the GPS started
+   * counting, or the count has drifted). Needs the km the service was done at. Ignored on a car whose odometer is read. */
+  dashboardKm?: number | null;
   notes?: string | null;
 }
 
@@ -146,6 +249,28 @@ function assertHasInterval(intervalKm: number | null | undefined, intervalMonths
 }
 
 /**
+ * The km the GPS count must add so that "service km + km since" lands on what the dashboard reads now. Zero for a
+ * vehicle whose own odometer is read (that one needs no help), and for no dashboard reading.
+ */
+function kmAdjustFor(
+  dashboardKm: number | null | undefined,
+  baseline: { lastDoneAt: Date | null; lastDoneKm: number | null },
+  ctx: KmContext,
+): number {
+  if (dashboardKm === null || dashboardKm === undefined || ctx.obdKm !== null) return 0;
+  if (baseline.lastDoneKm === null || !baseline.lastDoneAt) {
+    throw new MaintenanceError(400, "Para ajustar con el tablero hace falta el km y la fecha del último servicio");
+  }
+  if (dashboardKm < baseline.lastDoneKm) throw new MaintenanceError(400, "El km del tablero no puede ser menor que el del último servicio");
+  const gpsKm = kmAfterDay(ctx.daily, romeDay(baseline.lastDoneAt));
+  return Math.round(dashboardKm - baseline.lastDoneKm - gpsKm);
+}
+
+async function contextFor(vehicle: Vehicle): Promise<KmContext> {
+  return (await kmContexts([vehicle])).get(vehicle.id)!;
+}
+
+/**
  * Creates a plan. Without an explicit baseline it starts counting from today at the vehicle's
  * current odometer ("lo acabo de hacer / empiezo a controlarlo desde ahora").
  */
@@ -158,7 +283,11 @@ export async function createPlan(
 ): Promise<PlanView> {
   assertHasInterval(input.intervalKm, input.intervalMonths);
   const vehicle = await requireVehicle(orgId, vehicleId, allowedArea);
-  const odometerKm = correctedKm(await readTrackerKm(vehicle), vehicle.odometerOffsetKm);
+  const ctx = await contextFor(vehicle);
+
+  const lastDoneAt = input.lastDoneAt ?? now;
+  const lastDoneKm = input.lastDoneKm ?? ctx.obdKm;
+  const kmAdjust = kmAdjustFor(input.dashboardKm, { lastDoneAt, lastDoneKm }, ctx);
 
   const [row] = await db
     .insert(maintenancePlans)
@@ -168,12 +297,13 @@ export async function createPlan(
       name: input.name,
       intervalKm: input.intervalKm ?? null,
       intervalMonths: input.intervalMonths ?? null,
-      lastDoneAt: input.lastDoneAt ?? now,
-      lastDoneKm: input.lastDoneKm ?? odometerKm,
+      lastDoneAt,
+      lastDoneKm,
+      kmAdjust,
       notes: input.notes ?? null,
     })
     .returning();
-  return toPlanView(row!, odometerKm, now);
+  return toPlanView(row!, planKm(row!, ctx), now);
 }
 
 export async function updatePlan(
@@ -188,13 +318,25 @@ export async function updatePlan(
   const nextMonths = patch.intervalMonths === undefined ? plan.intervalMonths : patch.intervalMonths;
   assertHasInterval(nextKm, nextMonths);
 
+  const vehicle = await requireVehicle(orgId, plan.vehicleId, allowedArea);
+  const ctx = await contextFor(vehicle);
+  const { dashboardKm, ...fields } = patch;
+
+  // A new baseline starts the count over; a dashboard reading lines the new count up with it.
+  const baselineMoved = patch.lastDoneAt !== undefined || patch.lastDoneKm !== undefined;
+  const baseline = {
+    lastDoneAt: patch.lastDoneAt === undefined ? plan.lastDoneAt : patch.lastDoneAt,
+    lastDoneKm: patch.lastDoneKm === undefined ? plan.lastDoneKm : patch.lastDoneKm,
+  };
+  const kmAdjust =
+    dashboardKm !== undefined && dashboardKm !== null ? kmAdjustFor(dashboardKm, baseline, ctx) : baselineMoved ? 0 : plan.kmAdjust;
+
   const [row] = await db
     .update(maintenancePlans)
-    .set({ ...patch, updatedAt: now })
+    .set({ ...fields, kmAdjust, updatedAt: now })
     .where(eq(maintenancePlans.id, planId))
     .returning();
-  const vehicle = await requireVehicle(orgId, plan.vehicleId, allowedArea);
-  return toPlanView(row!, correctedKm(await readTrackerKm(vehicle), vehicle.odometerOffsetKm), now);
+  return toPlanView(row!, planKm(row!, ctx), now);
 }
 
 export async function deletePlan(orgId: string, allowedArea: string | null | undefined, planId: string): Promise<void> {
@@ -205,6 +347,8 @@ export async function deletePlan(orgId: string, allowedArea: string | null | und
 export interface RecordInput {
   doneAt?: Date;
   odometerKm?: number | null;
+  /** What the dashboard reads now (see PlanInput.dashboardKm); lines the count after this service up with it. */
+  dashboardKm?: number | null;
   notes?: string | null;
 }
 
@@ -222,24 +366,32 @@ export async function registerService(
 ): Promise<PlanView> {
   const plan = await requirePlan(orgId, planId, allowedArea);
   const vehicle = await requireVehicle(orgId, plan.vehicleId, allowedArea);
-  const currentKm = correctedKm(await readTrackerKm(vehicle), vehicle.odometerOffsetKm);
+  const ctx = await contextFor(vehicle);
+  const current = planKm(plan, ctx);
   const doneAt = input.doneAt ?? now;
   if (doneAt.getTime() > now.getTime() + 60_000) throw new MaintenanceError(400, "La fecha del servicio no puede ser futura");
 
-  const odometerKm = input.odometerKm !== undefined ? input.odometerKm : input.doneAt ? null : currentKm;
+  const odometerKm = input.odometerKm !== undefined ? input.odometerKm : input.doneAt ? null : current.dashboardKm;
 
   const updated = await db.transaction(async (tx) => {
     await tx.insert(maintenanceRecords).values({ planId, doneAt, odometerKm, notes: input.notes ?? null });
     const isNewest = !plan.lastDoneAt || doneAt.getTime() >= plan.lastDoneAt.getTime();
     if (!isNewest) return plan;
+    const lastDoneKm = odometerKm ?? plan.lastDoneKm;
     const [row] = await tx
       .update(maintenancePlans)
-      .set({ lastDoneAt: doneAt, lastDoneKm: odometerKm ?? plan.lastDoneKm, updatedAt: now })
+      .set({
+        lastDoneAt: doneAt,
+        lastDoneKm,
+        // the count starts over from this service
+        kmAdjust: kmAdjustFor(input.dashboardKm, { lastDoneAt: doneAt, lastDoneKm }, ctx),
+        updatedAt: now,
+      })
       .where(eq(maintenancePlans.id, planId))
       .returning();
     return row!;
   });
-  return toPlanView(updated, currentKm, now);
+  return toPlanView(updated, planKm(updated, ctx), now);
 }
 
 export async function listRecords(
@@ -256,29 +408,54 @@ export async function listRecords(
     .limit(100);
 }
 
+export interface Calibration {
+  source: KmSource;
+  /** The car's OBD odometer before the offset (null when the vehicle is counted by GPS). */
+  trackerKm: number | null;
+  offsetKm: number;
+  odometerKm: number;
+}
+
 /**
- * Sets the vehicle's offset so that the tracker's current reading matches the number on the
- * dashboard. Needs a current tracker reading to compare against.
+ * Lines the vehicle up with the number on its dashboard. A car whose own odometer is read gets an offset so that reading
+ * matches (and its plans' baselines move with it). Any other vehicle is counted by GPS, so each of its plans takes the
+ * adjustment that makes "service km + km since" equal the dashboard now.
  */
 export async function calibrateOdometer(
   orgId: string,
   allowedArea: string | null | undefined,
   vehicleId: string,
   dashboardKm: number,
-): Promise<{ trackerKm: number; offsetKm: number; odometerKm: number }> {
+): Promise<Calibration> {
   const vehicle = await requireVehicle(orgId, vehicleId, allowedArea);
-  const trackerKm = await readTrackerKm(vehicle);
+  const trackerKm = await readObdKm(vehicle);
+
   if (trackerKm === null) {
-    throw new MaintenanceError(400, "El dispositivo de este vehículo todavía no informó su kilometraje");
+    const ctx = await contextFor(vehicle);
+    const plans = await db.select().from(maintenancePlans).where(eq(maintenancePlans.vehicleId, vehicleId));
+    const adjustable = plans.filter((p) => p.lastDoneKm !== null && p.lastDoneAt !== null && p.lastDoneKm <= dashboardKm);
+    if (plans.length > 0 && adjustable.length === 0) {
+      throw new MaintenanceError(400, "Ningún plan tiene el km del último servicio (o es mayor que el del tablero)");
+    }
+    await db.transaction(async (tx) => {
+      for (const plan of adjustable) {
+        await tx
+          .update(maintenancePlans)
+          .set({ kmAdjust: kmAdjustFor(dashboardKm, plan, ctx) })
+          .where(eq(maintenancePlans.id, plan.id));
+      }
+    });
+    return { source: "gps", trackerKm: null, offsetKm: vehicle.odometerOffsetKm, odometerKm: dashboardKm };
   }
+
   const offsetKm = dashboardKm - trackerKm;
   const delta = offsetKm - vehicle.odometerOffsetKm;
 
   await db.transaction(async (tx) => {
     await tx.update(vehicles).set({ odometerOffsetKm: offsetKm }).where(eq(vehicles.id, vehicleId));
     if (delta === 0) return;
-    // Every stored km is on the corrected scale, so moving the offset moves the baselines with
-    // it — otherwise a plan done "at 8 000 km" would silently mean a different place on the road.
+    // Every stored km is on the corrected scale, so moving the offset moves the baselines with it — otherwise a plan
+    // done "at 8 000 km" would silently mean a different place on the road.
     const planIds = tx.select({ id: maintenancePlans.id }).from(maintenancePlans).where(eq(maintenancePlans.vehicleId, vehicleId));
     await tx
       .update(maintenancePlans)
@@ -289,7 +466,7 @@ export async function calibrateOdometer(
       .set({ odometerKm: sql`${maintenanceRecords.odometerKm} + ${delta}` })
       .where(inArray(maintenanceRecords.planId, planIds));
   });
-  return { trackerKm, offsetKm, odometerKm: dashboardKm };
+  return { source: "obd", trackerKm, offsetKm, odometerKm: dashboardKm };
 }
 
 /** All plans of an organization — what the alert evaluator walks each tick. */
@@ -302,7 +479,7 @@ export function maintenanceAlertMessage(vehicleName: string, planName: string, s
   const it = language === "it";
   if (status.state === "overdue") return `${vehicleName}: ${it ? "manutenzione scaduta" : "mantenimiento vencido"} — ${planName}`;
   const parts: string[] = [];
-  if (status.kmRemaining !== null && status.state === "soon" && status.kmRemaining >= 0 && status.dueKm !== null) {
+  if (status.kmRemaining !== null && (status.state === "soon" || status.state === "due") && status.kmRemaining >= 0 && status.dueKm !== null) {
     parts.push(it ? `mancano ${status.kmRemaining.toLocaleString("it-IT")} km` : `faltan ${status.kmRemaining.toLocaleString("es-AR")} km`);
   }
   if (status.daysRemaining !== null && status.daysRemaining <= 30) {

@@ -16,3 +16,4 @@ export * from "./deviceCommands.js";
 export * from "./vehicleDocuments.js";
 export * from "./pushTokens.js";
 export * from "./driverBeacons.js";
+export * from "./vehicleDailyKm.js";
