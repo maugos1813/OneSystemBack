@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { devices, driverBeacons, positions, vehicles } from "../db/schema/index.js";
 import { BEACON_ID_PATTERN, beaconIdFromMac, parseBeaconPayload, type BeaconReading } from "./beaconParser.js";
 import { identifyDrivers, MOVING_KMH, type DriverCandidate, type Scan } from "./driverIdentification.js";
+import { currentUsage, listVehicleUsages } from "./driverDirectory.service.js";
 import { getVehicleForOrg } from "./vehicle.service.js";
 
 export class DriverBeaconError extends Error {
@@ -244,9 +245,13 @@ export async function deleteBeacon(orgId: string, id: string): Promise<void> {
   if (rows.length === 0) throw new DriverBeaconError(404, "Baliza no encontrada");
 }
 
-export interface NamedDriver extends DriverCandidate {
+/** A driver of a vehicle: from Gamonal Driver (no beacon) or recognised by the beacon he carries. */
+export interface NamedDriver {
   name: string;
   phone: string | null;
+  beaconId: string | null;
+  presence: number | null;
+  avgRssi: number | null;
 }
 
 export interface VehicleDriverView {
@@ -255,9 +260,27 @@ export interface VehicleDriverView {
   to: string;
   movingScans: number;
   confidence: "high" | "low" | null;
+  /** "driver": Gamonal Driver says who has the vehicle (it wins); "beacon": a driver's beacon was heard in the cab. */
+  source: "driver" | "beacon" | null;
   driver: NamedDriver | null;
-  /** Other registered drivers heard steadily in the cab. */
+  /** Other drivers in the cab: heard steadily (beacon) or with a service on the vehicle in the same period (Driver). */
   others: NamedDriver[];
+  /** When Driver names someone and the beacon recognised somebody else: who the beacon heard. */
+  beaconDriver: NamedDriver | null;
+}
+
+/** "Rossi Marco" and "marco  rossi" are the same person: the two systems do not write names the same way. */
+export function sameName(a: string, b: string): boolean {
+  const words = (n: string) =>
+    n
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .split(/[^a-z0-9]+/)
+      .filter(Boolean)
+      .sort()
+      .join(" ");
+  return words(a) === words(b);
 }
 
 /**
@@ -281,13 +304,52 @@ export async function getVehicleDriver(
   const result = identifyDrivers(scans, new Set(names.keys())).get(vehicleId);
 
   const named = (c: DriverCandidate): NamedDriver => ({ ...c, name: names.get(c.beaconId)!, phone: phones.get(c.beaconId) ?? null });
-  return {
-    vehicleId,
-    from: from.toISOString(),
-    to: to.toISOString(),
+  const byBeacon = {
     movingScans: result?.movingScans ?? 0,
     confidence: result?.confidence ?? null,
     driver: result?.driver ? named(result.driver) : null,
     others: (result?.others ?? []).map(named),
   };
+  const base = { vehicleId, from: from.toISOString(), to: to.toISOString() };
+
+  // Gamonal Driver knows who has the vehicle without a beacon being heard: it wins, and the beacon only contradicts it.
+  const usages = vehicle.plate ? await listVehicleUsages(orgId, vehicle.plate, from, to) : [];
+  const now = currentUsage(usages, to);
+  if (now) {
+    const fromDriver = (u: { driver: { name: string; phone: string | null } }): NamedDriver => ({
+      name: u.driver.name,
+      phone: u.driver.phone,
+      beaconId: null,
+      presence: null,
+      avgRssi: null,
+    });
+    const others = usages.filter((u) => !sameName(u.driver.name, now.driver.name)).map(fromDriver);
+    const unique = others.filter((o, i) => others.findIndex((x) => sameName(x.name, o.name)) === i);
+    const beaconDriver = byBeacon.driver && !sameName(byBeacon.driver.name, now.driver.name) ? byBeacon.driver : null;
+    return { ...base, movingScans: byBeacon.movingScans, confidence: "high", source: "driver", driver: fromDriver(now), others: unique, beaconDriver };
+  }
+
+  return { ...base, ...byBeacon, source: byBeacon.driver ? "beacon" : null, beaconDriver: null };
+}
+
+export interface VehicleUsageView {
+  vehicleId: string;
+  from: string;
+  to: string;
+  /** Who had the vehicle in the period according to Gamonal Driver, earliest first (empty: it registered no service). */
+  usages: Awaited<ReturnType<typeof listVehicleUsages>>;
+}
+
+/** Every driver Gamonal Driver gave this vehicle to between [from, to]; for "who used it on that date". */
+export async function getVehicleUsages(
+  orgId: string,
+  allowedArea: string | null | undefined,
+  vehicleId: string,
+  from: Date,
+  to: Date,
+): Promise<VehicleUsageView> {
+  const vehicle = await getVehicleForOrg(orgId, vehicleId, allowedArea);
+  if (!vehicle) throw new DriverBeaconError(404, "Vehicle not found");
+  const usages = vehicle.plate ? await listVehicleUsages(orgId, vehicle.plate, from, to) : [];
+  return { vehicleId, from: from.toISOString(), to: to.toISOString(), usages };
 }

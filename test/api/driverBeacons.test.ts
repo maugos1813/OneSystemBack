@@ -55,6 +55,11 @@ beforeAll(async () => {
       priority smallint NOT NULL DEFAULT 0, io_data jsonb NOT NULL DEFAULT '{}', PRIMARY KEY (id, ts));
     CREATE TABLE driver_beacons (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, beacon_id varchar(100) NOT NULL,
       driver_name varchar(100) NOT NULL, phone varchar(30), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (org_id, beacon_id));
+    CREATE TABLE driver_people (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, external_id varchar(64) NOT NULL, name varchar(150) NOT NULL,
+      phone varchar(40), active boolean NOT NULL DEFAULT true, habitual_plate varchar(20), synced_at timestamptz NOT NULL DEFAULT now(), UNIQUE (org_id, external_id));
+    CREATE TABLE driver_usages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, external_id varchar(64) NOT NULL, driver_external_id varchar(64) NOT NULL,
+      plate varchar(20) NOT NULL, final_plate varchar(20), starts_at timestamptz NOT NULL, ends_at timestamptz, declared boolean NOT NULL DEFAULT false,
+      status varchar(20) NOT NULL, synced_at timestamptz NOT NULL DEFAULT now(), UNIQUE (org_id, external_id));
     INSERT INTO devices (id, org_id, imei) VALUES ('${DEVICE.dhl}', '${ORG}', '350000000000012'), ('${DEVICE.piazza}', '${ORG}', '350000000000011');
     INSERT INTO vehicles (id, org_id, name, plate, fleet_group, device_id) VALUES
       ('${VEHICLE.dhl}', '${ORG}', 'DHL van', 'DH222BB', 'DHL', '${DEVICE.dhl}'),
@@ -167,6 +172,51 @@ describe("driver beacons", () => {
 
     const created = await call("POST", "/driver-beacons", as("owner", null), { mac: "AABBCCDDEEFF", driverName: "Con teléfono", phone: "0039 06 1234567" });
     expect(created.json()).toMatchObject({ phone: "0039061234567" });
+  });
+
+  describe("with Gamonal Driver saying who has the vehicle", () => {
+    const at = (minutesFromStart: number) => new Date(START + minutesFromStart * 60_000).toISOString();
+    const seed = (name: string, phone: string | null, usage: { id: string; plate: string; from: string; to: string | null; final?: string }) =>
+      pg.exec(`
+        INSERT INTO driver_people (org_id, external_id, name, phone) VALUES ('${ORG}', 'p-${usage.id}', '${name}', ${phone ? `'${phone}'` : "NULL"});
+        INSERT INTO driver_usages (org_id, external_id, driver_external_id, plate, final_plate, starts_at, ends_at, declared, status)
+          VALUES ('${ORG}', '${usage.id}', 'p-${usage.id}', '${usage.plate}', ${usage.final ? `'${usage.final}'` : "NULL"}, '${usage.from}', ${usage.to ? `'${usage.to}'` : "NULL"}, true, 'CONSEGNATO');`);
+
+    it("names that driver, with the phone, even though no beacon was heard in that vehicle", async () => {
+      await seed("Giulia Verdi", "+393331112222", { id: "s-piazza", plate: "PZ111AA", from: at(-60), to: at(120) });
+      const res = await call("GET", `/vehicles/${VEHICLE.piazza}/driver?${RANGE}`, as("owner", null));
+      expect(res.json()).toMatchObject({
+        source: "driver",
+        confidence: "high",
+        driver: { name: "Giulia Verdi", phone: "+393331112222", beaconId: null },
+        beaconDriver: null,
+      });
+    });
+
+    it("prefers the Driver over the beacon and shows who the beacon heard when it is somebody else", async () => {
+      await seed("Luca Neri", null, { id: "s-dhl", plate: "DH222BB", from: at(-60), to: at(120) });
+      const res = await call("GET", `/vehicles/${VEHICLE.dhl}/driver?${RANGE}`, as("owner", null));
+      expect(res.json()).toMatchObject({ source: "driver", driver: { name: "Luca Neri" }, beaconDriver: { name: "Marco Rossi", beaconId: MARCO } });
+    });
+
+    it("does not call it a disagreement when the beacon driver is the same person written differently", async () => {
+      await seed("Rossi Marco", "+390611111", { id: "s-dhl-2", plate: "DH222BB", from: at(60), to: at(120) });
+      const res = await call("GET", `/vehicles/${VEHICLE.dhl}/driver?from=${at(70)}&to=${at(100)}`, as("owner", null));
+      expect(res.json()).toMatchObject({ source: "driver", driver: { name: "Rossi Marco" } });
+    });
+
+    it("lists every driver the vehicle had in the period, and flags a van swapped halfway", async () => {
+      await seed("Anna Blu", "+390622222", { id: "s-swap", plate: "AB000CD", final: "PZ111AA", from: at(130), to: at(200) });
+      const res = await call("GET", `/vehicles/${VEHICLE.piazza}/usage?from=${at(-120)}&to=${at(300)}`, as("owner", null));
+      const names = (res.json() as { usages: Array<{ driver: { name: string }; switched: boolean }> }).usages.map((u) => [u.driver.name, u.switched]);
+      expect(names).toEqual([["Giulia Verdi", false], ["Anna Blu", true]]);
+    });
+
+    it("answers only for vehicles of the caller's área and the same organization", async () => {
+      expect((await call("GET", `/vehicles/${VEHICLE.dhl}/usage?${RANGE}`, as("owner", null, OTHER_ORG))).statusCode).toBe(404);
+      expect((await call("GET", `/vehicles/${VEHICLE.piazza}/usage?${RANGE}`, as("client", "DHL"))).statusCode).toBe(404);
+      expect((await call("GET", `/vehicles/${VEHICLE.dhl}/usage?from=${at(10)}&to=${at(0)}`, as("owner", null))).statusCode).toBe(400);
+    });
   });
 
   it("renames and removes a beacon", async () => {

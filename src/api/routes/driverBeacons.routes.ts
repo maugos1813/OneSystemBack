@@ -6,6 +6,7 @@ import {
   deleteBeacon,
   DriverBeaconError,
   getVehicleDriver,
+  getVehicleUsages,
   listBeaconsByVehicle,
   listDetectedBeacons,
   listRegisteredBeacons,
@@ -39,6 +40,8 @@ const renameSchema = z.object({
 const idParams = z.object({ id: z.string().uuid() });
 const detectedQuery = z.object({ hours: z.coerce.number().int().min(1).max(72).default(24) });
 const byVehicleQuery = z.object({ hours: z.coerce.number().int().min(1).max(720).default(24) });
+const MAX_USAGE_WINDOW_DAYS = 93;
+const usageQuery = z.object({ from: z.coerce.date(), to: z.coerce.date() });
 const driverQuery = z.object({ from: z.coerce.date().optional(), to: z.coerce.date().optional() });
 
 async function requireOrgWideAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -169,6 +172,34 @@ export async function driverBeaconsRoutes(app: FastifyInstance): Promise<void> {
       }
       try {
         return await getVehicleDriver(request.user.orgId, request.user.allowedArea, params.data.id, from, to);
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.get(
+    "/vehicles/:id/usage",
+    {
+      preHandler: requireModule("conduccion"),
+      schema: {
+        tags: ["Choferes"],
+        summary: "Quién tuvo el vehículo en el periodo según Gamonal Driver (servicios registrados, con su horario)",
+        security: AUTH,
+        params: zodToJsonSchema(idParams),
+        querystring: zodToJsonSchema(usageQuery),
+      },
+    },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      const query = usageQuery.safeParse(request.query);
+      if (!params.success || !query.success) return reply.code(400).send({ error: "Invalid request" });
+      const { from, to } = query.data;
+      if (from >= to || to.getTime() - from.getTime() > MAX_USAGE_WINDOW_DAYS * 86_400_000) {
+        return reply.code(400).send({ error: "Invalid period" });
+      }
+      try {
+        return await getVehicleUsages(request.user.orgId, request.user.allowedArea, params.data.id, from, to);
       } catch (err) {
         return sendError(reply, err);
       }

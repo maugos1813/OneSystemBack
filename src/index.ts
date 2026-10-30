@@ -5,6 +5,7 @@ import { logger } from "./config/logger.js";
 import { db } from "./db/client.js";
 import { startAlertScheduler } from "./jobs/alertScheduler.js";
 import { startDailyKmScheduler } from "./jobs/dailyKmScheduler.js";
+import { startDriverDirectoryScheduler } from "./jobs/driverDirectoryScheduler.js";
 import { startRadiusVelocityScheduler } from "./jobs/radiusVelocityScheduler.js";
 import { publishPosition } from "./realtime/gateway.js";
 import { dispatchPendingCommands, recordCommandResponse } from "./services/deviceCommand.service.js";
@@ -26,6 +27,7 @@ async function main() {
   startAlertScheduler();
   startRadiusVelocityScheduler();
   startDailyKmScheduler();
+  startDriverDirectoryScheduler();
 
   await startTcpServer({
     onIdentify: async (imei) => {

@@ -31,6 +31,11 @@ const envSchema = z.object({
   // The backend of Gamonal Driver (its API root, ending in /api). A client's map in OneTrack also shows the Gamonal vehicles the Driver
   // admin has switched on for the map: they are asked of the Driver as that same person (see driverVehicles.service.ts).
   DRIVER_API_URL: z.string().url().default("https://appgamonaltrasportiback-vv19.onrender.com/api"),
+  // Key to READ from Gamonal Driver its drivers (with phone) and who used each vehicle (its ONESYSTEC_INTEGRATION_KEY, 32+ random
+  // characters, the same value on both sides). Which org that data belongs to: DRIVER_ORG_ID, or RADIUS_VELOCITY_ORG_ID when not set.
+  // Without the key the sync simply does not run.
+  DRIVER_INTEGRATION_KEY: z.string().min(32).optional(),
+  DRIVER_ORG_ID: z.string().uuid().optional(),
   // Radius Velocity (third-party telematics) integration. Left unset, the scheduler
   // still starts but silently skips syncing — same graceful-no-op pattern as RESEND_API_KEY.
   RADIUS_VELOCITY_REFRESH_TOKEN: z.string().optional(),
