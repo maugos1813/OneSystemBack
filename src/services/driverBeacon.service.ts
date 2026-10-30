@@ -4,6 +4,7 @@ import { devices, driverBeacons, positions, vehicles } from "../db/schema/index.
 import { BEACON_ID_PATTERN, beaconIdFromMac, parseBeaconPayload, type BeaconReading } from "./beaconParser.js";
 import { identifyDrivers, MOVING_KMH, type DriverCandidate, type Scan } from "./driverIdentification.js";
 import { currentUsage, listVehicleUsages } from "./driverDirectory.service.js";
+import { ignitionAt, type IgnitionChange } from "./ignitionTimeline.js";
 import { getVehicleForOrg } from "./vehicle.service.js";
 
 export class DriverBeaconError extends Error {
@@ -56,6 +57,29 @@ async function loadScans(orgId: string, from: Date, to: Date): Promise<Loaded> {
     scans.set(key, scan);
   }
   return { scans: [...scans.values()], vehicles: refs };
+}
+
+/** How far before the period to look for the ignition state the period starts with. */
+const IGNITION_LOOKBACK_MS = 24 * 3_600_000;
+
+/** Per vehicle, the moments its ignition changed from `from` (and the state it had then) to `to`. */
+async function loadIgnition(orgId: string, from: Date, to: Date): Promise<Map<string, IgnitionChange[]>> {
+  const { rows } = await db.execute<{ vehicle_id: string; ts: Date | string; on: number }>(sql`
+    SELECT vehicle_id, ts, ign AS on FROM (
+      SELECT v.id AS vehicle_id, p.ts, (p.io_data->>'239')::int AS ign,
+             lag((p.io_data->>'239')::int) OVER (PARTITION BY p.device_id ORDER BY p.ts) AS prev
+      FROM positions p JOIN vehicles v ON v.device_id = p.device_id JOIN devices d ON d.id = v.device_id AND d.source = 'teltonika'
+      WHERE v.org_id = ${orgId}
+        AND p.ts BETWEEN ${new Date(from.getTime() - IGNITION_LOOKBACK_MS).toISOString()}::timestamptz AND ${to.toISOString()}::timestamptz
+        AND p.io_data ? '239'
+    ) t WHERE prev IS DISTINCT FROM ign ORDER BY vehicle_id, ts`);
+  const byVehicle = new Map<string, IgnitionChange[]>();
+  for (const row of rows) {
+    const list = byVehicle.get(row.vehicle_id) ?? [];
+    list.push({ ts: new Date(row.ts).getTime(), on: Number(row.on) === 1 });
+    byVehicle.set(row.vehicle_id, list);
+  }
+  return byVehicle;
 }
 
 export function listRegisteredBeacons(orgId: string) {
@@ -124,6 +148,8 @@ export interface BeaconInVehicle {
   /** Beacon reports it appeared in, and how many of them were taken while the vehicle was moving. */
   sightings: number;
   movingSightings: number;
+  /** How many of them were taken with the ignition on (the engine running, moving or not). */
+  ignitionSightings: number;
   /** Mean RSSI in dBm: about -50 to -70 at arm's length, -90 and below is far away. */
   avgRssi: number | null;
 }
@@ -141,7 +167,9 @@ export interface VehicleBeacons {
  * driver of another vehicle nearby, which is why moving reports are counted apart.
  */
 export async function listBeaconsByVehicle(orgId: string, hours: number, now: Date = new Date()): Promise<VehicleBeacons[]> {
-  const { scans } = await loadScans(orgId, new Date(now.getTime() - hours * 3_600_000), now);
+  const from = new Date(now.getTime() - hours * 3_600_000);
+  const { scans } = await loadScans(orgId, from, now);
+  const ignition = await loadIgnition(orgId, from, now);
   const registered = new Map((await listRegisteredBeacons(orgId)).map((b) => [b.beaconId, b]));
   const trackers = await db
     .select({ id: vehicles.id, name: vehicles.name, plate: vehicles.plate, model: devices.model })
@@ -154,18 +182,23 @@ export async function listBeaconsByVehicle(orgId: string, hours: number, now: Da
     last: number;
     n: number;
     moving: number;
+    engineOn: number;
     rssis: number[];
   }
   const byVehicle = new Map<string, { lastReport: number; beacons: Map<string, Acc> }>();
   for (const scan of scans) {
     const entry = byVehicle.get(scan.vehicleId) ?? { lastReport: 0, beacons: new Map<string, Acc>() };
     entry.lastReport = Math.max(entry.lastReport, scan.ts);
+    // A scan has no ignition reading of its own; if none is known (no ordinary report before it), moving means it was on.
+    const moving = scan.speedKmh >= MOVING_KMH;
+    const engineOn = moving || ignitionAt(ignition.get(scan.vehicleId) ?? [], scan.ts) === true;
     for (const b of scan.beacons) {
-      const acc = entry.beacons.get(b.id) ?? { first: scan.ts, last: scan.ts, n: 0, moving: 0, rssis: [] };
+      const acc = entry.beacons.get(b.id) ?? { first: scan.ts, last: scan.ts, n: 0, moving: 0, engineOn: 0, rssis: [] };
       acc.first = Math.min(acc.first, scan.ts);
       acc.last = Math.max(acc.last, scan.ts);
       acc.n += 1;
-      if (scan.speedKmh >= MOVING_KMH) acc.moving += 1;
+      if (moving) acc.moving += 1;
+      if (engineOn) acc.engineOn += 1;
       if (b.rssi !== null) acc.rssis.push(b.rssi);
       entry.beacons.set(b.id, acc);
     }
@@ -186,13 +219,14 @@ export async function listBeaconsByVehicle(orgId: string, hours: number, now: Da
           lastSeen: new Date(a.last).toISOString(),
           sightings: a.n,
           movingSightings: a.moving,
+          ignitionSightings: a.engineOn,
           avgRssi: a.rssis.length > 0 ? Math.round((a.rssis.reduce((x, y) => x + y, 0) / a.rssis.length) * 10) / 10 : null,
         };
       });
       beacons.sort(
         (a, b) =>
           Number(b.driverName !== null) - Number(a.driverName !== null) ||
-          b.movingSightings - a.movingSightings ||
+          b.ignitionSightings - a.ignitionSightings ||
           (b.avgRssi ?? -127) - (a.avgRssi ?? -127),
       );
       return { vehicle, lastReport: entry ? new Date(entry.lastReport).toISOString() : null, beacons };

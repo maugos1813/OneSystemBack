@@ -219,6 +219,32 @@ describe("driver beacons", () => {
     });
   });
 
+  it("counts the readings taken with the engine on, even when the vehicle is not moving", async () => {
+    // The tracker sends beacon scans as reports of their own, with no ignition: it is the ordinary report before that says it.
+    const T = Date.now() - 30 * 60_000;
+    const at = (min: number) => new Date(T + min * 60_000).toISOString();
+    const scan = (rssi: number) => JSON.stringify({ "385": "11" + "01" + "00112233445566778899" + "ffeeddccbbaa" + (rssi & 0xff).toString(16).padStart(2, "0") });
+    await pg.exec(`INSERT INTO positions (device_id, ts, lat, lng, speed, io_data) VALUES
+      ('${DEVICE.piazza}', '${at(0)}', 45.2, 9.2, 0, '{"239":1}'),
+      ('${DEVICE.piazza}', '${at(1)}', 45.2, 9.2, 0, '${scan(-60)}'),
+      ('${DEVICE.piazza}', '${at(2)}', 45.2, 9.2, 0, '${scan(-60)}'),
+      ('${DEVICE.piazza}', '${at(10)}', 45.2, 9.2, 0, '{"239":0}'),
+      ('${DEVICE.piazza}', '${at(11)}', 45.2, 9.2, 0, '${scan(-60)}'),
+      ('${DEVICE.piazza}', '${at(12)}', 45.2, 9.2, 0, '${scan(-60)}')`);
+
+    const list = (await call("GET", "/driver-beacons/by-vehicle?hours=24", as("owner", null))).json() as Array<{
+      vehicle: { id: string };
+      beacons: Array<{ beaconId: string; sightings: number; movingSightings: number; ignitionSightings: number }>;
+    }>;
+    const beacon = list.find((v) => v.vehicle.id === VEHICLE.piazza)!.beacons.find((b) => b.beaconId === "eddystone:00112233445566778899-ffeeddccbbaa");
+    expect(beacon).toMatchObject({ sightings: 4, movingSightings: 0, ignitionSightings: 2 });
+
+    // A vehicle that moves counts as on even with no ignition report around.
+    const dhl = list.find((v) => v.vehicle.id === VEHICLE.dhl)!.beacons.find((b) => b.beaconId === MARCO)!;
+    expect(dhl.ignitionSightings).toBe(dhl.movingSightings);
+    expect(dhl.movingSightings).toBeGreaterThan(0);
+  });
+
   it("renames and removes a beacon", async () => {
     const [beacon] = (await call("GET", "/driver-beacons", as("owner", null))).json() as Array<{ id: string }>;
     expect((await call("PATCH", `/driver-beacons/${beacon!.id}`, as("owner", null), { driverName: "Marco R." })).json()).toMatchObject({ driverName: "Marco R." });
