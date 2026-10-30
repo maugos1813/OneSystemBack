@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EtaError, estimateRoute, geocode, resetEtaState } from "../../src/services/eta.service.js";
+import {
+  EtaError,
+  estimateRoute,
+  geocode,
+  MAX_PATH_POINTS,
+  resetEtaState,
+  toPath,
+} from "../../src/services/eta.service.js";
 
 /** "How long until it gets there": the place is found in OpenStreetMap, the road time comes from OSRM, and the shared servers are spared. */
 
@@ -72,6 +79,31 @@ describe("how long a vehicle takes to reach a place", () => {
       destination: { label: "Roma, Roma Capitale" },
     });
     expect(String(fetchMock.mock.calls[1]![0])).toContain("/route/v1/driving/9.19,45.4642;12.5,41.9");
+  });
+
+  it("returns the road ahead as [lat, lng] points, thinned out but keeping both ends", async () => {
+    const line = Array.from({ length: 2_500 }, (_, i) => [9.19 + i * 0.001, 45.46 - i * 0.0005]);
+    fetchMock
+      .mockResolvedValueOnce(json([place()]))
+      .mockResolvedValueOnce(
+        json({ code: "Ok", routes: [{ distance: 1000, duration: 60, geometry: { coordinates: line } }] }),
+      );
+    const { path } = await estimateRoute(MILAN, "Roma", noWait);
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("overview=full&geometries=geojson");
+    expect(path.length).toBeLessThanOrEqual(MAX_PATH_POINTS + 1);
+    expect(path[0]).toEqual([45.46, 9.19]);
+    expect(path[path.length - 1]).toEqual([
+      Math.round((45.46 - 2_499 * 0.0005) * 1e5) / 1e5,
+      Math.round((9.19 + 2_499 * 0.001) * 1e5) / 1e5,
+    ]);
+  });
+
+  it("copes with a route that comes without a line, or with junk in it", () => {
+    expect(toPath(undefined)).toEqual([]);
+    expect(toPath([[9.1, 45.1], "x", [Number.NaN, 1], [9.2, 45.2]])).toEqual([
+      [45.1, 9.1],
+      [45.2, 9.2],
+    ]);
   });
 
   it("says so when nothing matches, and when there is no road between the two", async () => {

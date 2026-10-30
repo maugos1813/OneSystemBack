@@ -31,6 +31,8 @@ export interface RouteEstimate {
   durationMin: number;
   /** The road time as OSRM gives it, with no traffic. */
   baseDurationMin: number;
+  /** The road ahead, from the vehicle to the destination, as [lat, lng] points (thinned out, enough to draw it). */
+  path: Array<[number, number]>;
 }
 
 const NOMINATIM = "https://nominatim.openstreetmap.org/search";
@@ -39,6 +41,8 @@ const TIMEOUT_MS = 8_000;
 const MIN_GAP_MS = 1_100;
 const CACHE_TTL_MS = 24 * 3_600_000;
 const CACHE_MAX = 500;
+/** A long route has thousands of road points; a few hundred draw the same line. */
+export const MAX_PATH_POINTS = 600;
 /** Results are looked for near the vehicle first: "Via Roma" means a different street in Milan than in Naples. */
 const BIAS_DEG = 2;
 export const MIN_QUERY_LENGTH = 3;
@@ -152,16 +156,28 @@ function labelOf(row: NominatimRow, query: string): string {
   return long.slice(0, 3).join(", ");
 }
 
-/** Road distance and time between two points. */
+/** OSRM gives [lng, lat]; the map wants [lat, lng]. Keeps the first and last points and spreads the rest evenly. */
+export function toPath(coordinates: unknown): Array<[number, number]> {
+  if (!Array.isArray(coordinates)) return [];
+  const points = coordinates.filter(
+    (c): c is [number, number] => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]),
+  );
+  const step = Math.max(1, Math.ceil(points.length / MAX_PATH_POINTS));
+  const kept = points.filter((_, i) => i % step === 0 || i === points.length - 1);
+  const round = (n: number) => Math.round(n * 1e5) / 1e5;
+  return kept.map(([lng, lat]) => [round(lat), round(lng)]);
+}
+
+/** Road distance, time and line between two points. */
 export async function drive(
   from: Point,
   to: Point,
-): Promise<{ distanceKm: number; baseDurationMin: number }> {
+): Promise<{ distanceKm: number; baseDurationMin: number; path: Array<[number, number]> }> {
   const base = env.OSRM_BASE_URL.replace(/\/+$/, "");
-  const url = `${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=false`;
+  const url = `${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
   const body = (await getJson(url)) as {
     code?: string;
-    routes?: Array<{ distance?: number; duration?: number }>;
+    routes?: Array<{ distance?: number; duration?: number; geometry?: { coordinates?: unknown } }>;
   };
   const route = body.routes?.[0];
   if (body.code !== "Ok" || !route || !Number.isFinite(route.distance) || !Number.isFinite(route.duration)) {
@@ -170,6 +186,7 @@ export async function drive(
   return {
     distanceKm: Math.round((route.distance! / 1000) * 10) / 10,
     baseDurationMin: route.duration! / 60,
+    path: toPath(route.geometry?.coordinates),
   };
 }
 
@@ -181,9 +198,10 @@ export async function estimateRoute(
   const destination = await geocode(text, from, sleep);
   if (!destination)
     throw new EtaError(404, "No encontré ese lugar. Prueba con la ciudad, o con la calle y la ciudad.");
-  const { distanceKm, baseDurationMin } = await drive(from, destination);
+  const { distanceKm, baseDurationMin, path } = await drive(from, destination);
   return {
     destination,
+    path,
     distanceKm,
     baseDurationMin: Math.round(baseDurationMin),
     durationMin: Math.max(1, Math.round(baseDurationMin * env.ETA_TRAFFIC_FACTOR)),

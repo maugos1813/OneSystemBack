@@ -45,7 +45,21 @@ const answerMaps = () =>
               display_name: "Roma, Italia",
             },
           ])
-        : json({ code: "Ok", routes: [{ distance: 573_400, duration: 21_480 }] }),
+        : json({
+            code: "Ok",
+            routes: [
+              {
+                distance: 573_400,
+                duration: 21_480,
+                geometry: {
+                  coordinates: [
+                    [9.19, 45.46],
+                    [12.5, 41.9],
+                  ],
+                },
+              },
+            ],
+          }),
     ),
   );
 
@@ -93,6 +107,10 @@ describe("estimated arrival at an address", () => {
       distanceKm: 573.4,
       baseDurationMin: 358,
       durationMin: 412,
+      path: [
+        [45.46, 9.19],
+        [41.9, 12.5],
+      ],
       from: { lat: 45.4642, lng: 9.19 },
       positionAgeMin: 7,
     });
