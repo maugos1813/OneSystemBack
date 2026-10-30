@@ -211,6 +211,13 @@
       "when": 1793287980864,
       "tag": "0029_vehicle_daily_km",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1793353622746,
+      "tag": "0030_driver_phone",
+      "breakpoints": true
     }
   ]
 }

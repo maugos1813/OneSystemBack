@@ -54,7 +54,7 @@ beforeAll(async () => {
       lng double precision NOT NULL, altitude integer NOT NULL DEFAULT 0, angle integer NOT NULL DEFAULT 0, satellites smallint, speed integer NOT NULL DEFAULT 0,
       priority smallint NOT NULL DEFAULT 0, io_data jsonb NOT NULL DEFAULT '{}', PRIMARY KEY (id, ts));
     CREATE TABLE driver_beacons (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, beacon_id varchar(100) NOT NULL,
-      driver_name varchar(100) NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (org_id, beacon_id));
+      driver_name varchar(100) NOT NULL, phone varchar(30), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (org_id, beacon_id));
     INSERT INTO devices (id, org_id, imei) VALUES ('${DEVICE.dhl}', '${ORG}', '350000000000012'), ('${DEVICE.piazza}', '${ORG}', '350000000000011');
     INSERT INTO vehicles (id, org_id, name, plate, fleet_group, device_id) VALUES
       ('${VEHICLE.dhl}', '${ORG}', 'DHL van', 'DH222BB', 'DHL', '${DEVICE.dhl}'),
@@ -151,6 +151,22 @@ describe("driver beacons", () => {
     const res = await call("GET", `/vehicles/${VEHICLE.dhl}/driver?${RANGE}`, as("owner", null, OTHER_ORG));
     expect(res.statusCode).toBe(404);
     expect(((await call("GET", "/driver-beacons", as("owner", null, OTHER_ORG))).json() as unknown[]).length).toBe(0);
+  });
+
+  it("keeps the driver's phone so the vehicle's panel can call them, and cleans it up", async () => {
+    const [marco] = ((await call("GET", "/driver-beacons", as("owner", null))).json() as Array<{ id: string; beaconId: string }>).filter((b) => b.beaconId === MARCO);
+    const patch = (phone: string | null) => call("PATCH", `/driver-beacons/${marco!.id}`, as("owner", null), { phone });
+
+    expect((await patch("+39 333 123-4567")).json()).toMatchObject({ phone: "+393331234567", driverName: "Marco Rossi" });
+    const res = await call("GET", `/vehicles/${VEHICLE.dhl}/driver?${RANGE}`, as("owner", null));
+    expect(res.json()).toMatchObject({ driver: { name: "Marco Rossi", phone: "+393331234567" } });
+
+    expect((await patch("abc")).statusCode).toBe(400);
+    expect((await patch("")).json()).toMatchObject({ phone: null });
+    expect((await call("PATCH", `/driver-beacons/${marco!.id}`, as("owner", null), {})).statusCode).toBe(400);
+
+    const created = await call("POST", "/driver-beacons", as("owner", null), { mac: "AABBCCDDEEFF", driverName: "Con teléfono", phone: "0039 06 1234567" });
+    expect(created.json()).toMatchObject({ phone: "0039061234567" });
   });
 
   it("renames and removes a beacon", async () => {

@@ -28,9 +28,14 @@ const createSchema = z
     /** The MAC printed on an EYE Beacon's label, with or without separators. */
     mac: z.string().trim().min(12).max(17).optional(),
     driverName: z.string().trim().min(1).max(100),
+    phone: z.string().trim().max(30).nullish(),
   })
   .refine((v) => (v.beaconId === undefined) !== (v.mac === undefined), "Indica la MAC o el identificador de la baliza, no ambos");
-const renameSchema = z.object({ driverName: z.string().trim().min(1).max(100) });
+const renameSchema = z.object({
+  driverName: z.string().trim().min(1).max(100).optional(),
+  /** "" or null removes the phone. */
+  phone: z.string().trim().max(30).nullish(),
+});
 const idParams = z.object({ id: z.string().uuid() });
 const detectedQuery = z.object({ hours: z.coerce.number().int().min(1).max(72).default(24) });
 const byVehicleQuery = z.object({ hours: z.coerce.number().int().min(1).max(720).default(24) });
@@ -119,7 +124,7 @@ export async function driverBeaconsRoutes(app: FastifyInstance): Promise<void> {
       const body = renameSchema.safeParse(request.body);
       if (!params.success || !body.success) return reply.code(400).send({ error: "Invalid request" });
       try {
-        return await renameBeacon(request.user.orgId, params.data.id, body.data.driverName);
+        return await renameBeacon(request.user.orgId, params.data.id, body.data);
       } catch (err) {
         return sendError(reply, err);
       }

@@ -15,6 +15,8 @@ export const driverBeacons = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     beaconId: varchar("beacon_id", { length: 100 }).notNull(),
     driverName: varchar("driver_name", { length: 100 }).notNull(),
+    /** Where to call the driver from the vehicle's panel; optional. */
+    phone: varchar("phone", { length: 30 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [unique("driver_beacons_org_beacon_unique").on(table.orgId, table.beaconId)],

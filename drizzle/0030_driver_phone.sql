@@ -1,0 +1,1 @@
+ALTER TABLE "driver_beacons" ADD COLUMN "phone" varchar(30);

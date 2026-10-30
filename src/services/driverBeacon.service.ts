@@ -116,6 +116,7 @@ export interface BeaconInVehicle {
   beaconId: string;
   /** Driver the beacon is registered to, null while it is not registered. */
   driverName: string | null;
+  phone: string | null;
   registeredId: string | null;
   firstSeen: string;
   lastSeen: string;
@@ -178,6 +179,7 @@ export async function listBeaconsByVehicle(orgId: string, hours: number, now: Da
         return {
           beaconId,
           driverName: reg?.driverName ?? null,
+          phone: reg?.phone ?? null,
           registeredId: reg?.id ?? null,
           firstSeen: new Date(a.first).toISOString(),
           lastSeen: new Date(a.last).toISOString(),
@@ -197,23 +199,37 @@ export async function listBeaconsByVehicle(orgId: string, hours: number, now: Da
     .sort((a, b) => a.vehicle.name.localeCompare(b.vehicle.name));
 }
 
-export async function createBeacon(orgId: string, input: { beaconId?: string; mac?: string; driverName: string }) {
+/** Digits, with an optional leading "+" and the usual separators removed; null when nothing is left. */
+export function normalizePhone(raw: string | null | undefined): string | null {
+  const trimmed = (raw ?? "").trim();
+  if (!trimmed) return null;
+  const digits = trimmed.replace(/\D/g, "");
+  if (digits.length < 6) throw new DriverBeaconError(400, "Teléfono inválido");
+  return `${trimmed.startsWith("+") ? "+" : ""}${digits}`;
+}
+
+export async function createBeacon(orgId: string, input: { beaconId?: string; mac?: string; driverName: string; phone?: string | null }) {
   const beaconId = input.mac !== undefined ? beaconIdFromMac(input.mac) : (input.beaconId ?? "").trim().toLowerCase();
   if (input.mac !== undefined && !beaconId) throw new DriverBeaconError(400, "MAC inválida: son 12 caracteres hexadecimales, como 7C:D9:F4:0B:39:E3");
   if (!beaconId || !BEACON_ID_PATTERN.test(beaconId)) throw new DriverBeaconError(400, "Identificador de baliza inválido");
   const [row] = await db
     .insert(driverBeacons)
-    .values({ orgId, beaconId, driverName: input.driverName.trim() })
+    .values({ orgId, beaconId, driverName: input.driverName.trim(), phone: normalizePhone(input.phone) })
     .onConflictDoNothing()
     .returning();
   if (!row) throw new DriverBeaconError(409, "Esa baliza ya está asignada");
   return row;
 }
 
-export async function renameBeacon(orgId: string, id: string, driverName: string) {
+/** Changes the driver's name and/or phone; a phone sent as "" or null is cleared, one left out is kept. */
+export async function renameBeacon(orgId: string, id: string, changes: { driverName?: string; phone?: string | null }) {
+  const set: Partial<{ driverName: string; phone: string | null }> = {};
+  if (changes.driverName !== undefined) set.driverName = changes.driverName.trim();
+  if (changes.phone !== undefined) set.phone = normalizePhone(changes.phone);
+  if (Object.keys(set).length === 0) throw new DriverBeaconError(400, "Nada que cambiar");
   const [row] = await db
     .update(driverBeacons)
-    .set({ driverName: driverName.trim() })
+    .set(set)
     .where(and(eq(driverBeacons.id, id), eq(driverBeacons.orgId, orgId)))
     .returning();
   if (!row) throw new DriverBeaconError(404, "Baliza no encontrada");
@@ -230,6 +246,7 @@ export async function deleteBeacon(orgId: string, id: string): Promise<void> {
 
 export interface NamedDriver extends DriverCandidate {
   name: string;
+  phone: string | null;
 }
 
 export interface VehicleDriverView {
@@ -259,10 +276,11 @@ export async function getVehicleDriver(
 
   const registered = await listRegisteredBeacons(orgId);
   const names = new Map(registered.map((b) => [b.beaconId, b.driverName]));
+  const phones = new Map(registered.map((b) => [b.beaconId, b.phone]));
   const { scans } = await loadScans(orgId, from, to);
   const result = identifyDrivers(scans, new Set(names.keys())).get(vehicleId);
 
-  const named = (c: DriverCandidate): NamedDriver => ({ ...c, name: names.get(c.beaconId)! });
+  const named = (c: DriverCandidate): NamedDriver => ({ ...c, name: names.get(c.beaconId)!, phone: phones.get(c.beaconId) ?? null });
   return {
     vehicleId,
     from: from.toISOString(),
