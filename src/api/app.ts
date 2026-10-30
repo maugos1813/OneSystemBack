@@ -11,6 +11,7 @@ import { apiKeysRoutes } from "./routes/apiKeys.routes.js";
 import { authRoutes } from "./routes/auth.routes.js";
 import { devicesRoutes } from "./routes/devices.routes.js";
 import { driverVehiclesRoutes } from "./routes/driverVehicles.routes.js";
+import { etaRoutes } from "./routes/eta.routes.js";
 import { drivingStyleRoutes } from "./routes/drivingStyle.routes.js";
 import { geofencesRoutes } from "./routes/geofences.routes.js";
 import { positionsRoutes } from "./routes/positions.routes.js";
@@ -106,6 +107,7 @@ const app = Fastify({ loggerInstance: logger });
   await app.register(driverBeaconsRoutes);
   await app.register(pushTokensRoutes);
   await app.register(driverVehiclesRoutes);
+  await app.register(etaRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

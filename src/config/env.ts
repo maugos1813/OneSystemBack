@@ -43,6 +43,11 @@ const envSchema = z.object({
   // Which org synced vehicles belong to (GamonalTrasporti). Required alongside
   // RADIUS_VELOCITY_REFRESH_TOKEN for the sync to actually run.
   RADIUS_VELOCITY_ORG_ID: z.string().optional(),
+  // "How long until it gets there": the destination is found with OpenStreetMap (Nominatim) and the road time comes from OSRM, both
+  // free. OSRM has no live traffic, so its time is multiplied by this factor (the Gamonal Driver uses the same 1.15). Point
+  // OSRM_BASE_URL at your own server for heavier use: the public one is a best-effort demo.
+  OSRM_BASE_URL: z.string().url().default("https://router.project-osrm.org"),
+  ETA_TRAFFIC_FACTOR: z.coerce.number().min(1).max(3).default(1.15),
 });
 
 const parsed = envSchema.safeParse(process.env);
