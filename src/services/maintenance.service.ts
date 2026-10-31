@@ -10,6 +10,7 @@ import {
 } from "../db/schema/index.js";
 import type { Language } from "./i18n.js";
 import { addDays, kmAfterDay, listDailyKm, romeDay, type DailyKm } from "./dailyKm.service.js";
+import { resolveOdometer } from "./odometer.js";
 import { computePlanStatus, oemOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
 import { getLatestOdometerReading, getLatestReading } from "./position.service.js";
 import { getVehicleForOrg, listVehiclesForOrg } from "./vehicle.service.js";
@@ -71,6 +72,8 @@ export interface KmContext {
   /** The vehicle's GPS correction already applied to `daily` (1 when it has none), and the totals before it. */
   factor?: number;
   rawDaily?: DailyKm[];
+  /** The vehicle's own km (see odometer.ts), when it has them: the one number every plan is measured against. */
+  vehicleKm?: number | null;
 }
 
 export interface PlanKm {
@@ -88,6 +91,17 @@ export interface PlanKm {
  * done at, so the dashboard figure follows without anyone typing it.
  */
 export function planKm(plan: Pick<MaintenancePlan, "lastDoneAt" | "lastDoneKm" | "kmAdjust">, ctx: KmContext): PlanKm {
+  // The vehicle's own km (typed once and counted on, or read from its odometer) are the single truth: a plan with the km
+  // of its last service is simply measured against them.
+  if (ctx.vehicleKm != null && plan.lastDoneKm !== null) {
+    return {
+      source: ctx.obdKm !== null ? "obd" : "gps",
+      currentKm: ctx.vehicleKm,
+      kmSince: ctx.vehicleKm - plan.lastDoneKm,
+      dashboardKm: ctx.vehicleKm,
+      partial: false,
+    };
+  }
   if (ctx.obdKm !== null) {
     return {
       source: "obd",
@@ -157,10 +171,8 @@ export async function kmContexts(vehicles: Vehicle[]): Promise<Map<string, KmCon
       const factor = vehicle.kmFactor;
       // Every km counted by GPS (plans, the vehicle's km) goes through the vehicle's learned correction.
       const rows = factor === 1 ? rawDaily : rawDaily.map((d) => ({ day: d.day, km: d.km * factor }));
-      return [
-        vehicle.id,
-        { obdRaw, obdKm: correctedKm(obdRaw, vehicle.odometerOffsetKm), daily: rows, rawDaily, factor, coverageFrom: rawDaily[0]?.day ?? null },
-      ] as const;
+      const ctx = { obdRaw, obdKm: correctedKm(obdRaw, vehicle.odometerOffsetKm), daily: rows, rawDaily, factor, coverageFrom: rawDaily[0]?.day ?? null };
+      return [vehicle.id, { ...ctx, vehicleKm: resolveOdometer(vehicle, ctx).km }] as const;
     }),
   );
   return new Map(entries);

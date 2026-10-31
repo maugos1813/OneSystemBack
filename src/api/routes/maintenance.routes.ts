@@ -10,6 +10,7 @@ import {
   registerService,
   updatePlan,
 } from "../../services/maintenance.service.js";
+import { getTagliando, registerTagliando } from "../../services/tagliando.service.js";
 import { requireAuth, requireModule, requireRole } from "../middlewares/auth.middleware.js";
 
 /**
@@ -53,6 +54,11 @@ const recordSchema = z.object({
   dashboardKm: km.nullable().optional(),
   notes: optionalText(1000),
 });
+const tagliandoSchema = z.object({
+  km: km,
+  doneAt: dateField.optional(),
+  mode: z.enum(["new", "fix"]).optional(),
+});
 const calibrateSchema = z.object({ dashboardKm: km });
 const idParams = z.object({ id: z.string().uuid() });
 
@@ -77,6 +83,37 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
       const query = z.object({ vehicleId: z.string().uuid().optional() }).safeParse(request.query);
       if (!query.success) return reply.code(400).send({ error: "Invalid vehicle id" });
       return listMaintenance(request.user.orgId, request.user.allowedArea, new Date(), query.data.vehicleId);
+    },
+  );
+
+  app.get(
+    "/maintenance/vehicles/:id/tagliando",
+    { schema: { tags: ["Maintenance"], summary: "El tagliando del vehículo: cuántos km faltan para el próximo", security: AUTH } },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      if (!params.success) return reply.code(400).send({ error: "Invalid vehicle id" });
+      try {
+        return await getTagliando(request.user.orgId, request.user.allowedArea, params.data.id);
+      } catch (err) {
+        return fail(reply, err);
+      }
+    },
+  );
+
+  app.put(
+    "/maintenance/vehicles/:id/tagliando",
+    { preHandler: MANAGE, schema: { tags: ["Maintenance"], summary: "Anotar un tagliando hecho (km del tablero ese día)", security: AUTH } },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      const body = tagliandoSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: body.success ? "Invalid vehicle id" : body.error.flatten() });
+      }
+      try {
+        return await registerTagliando(request.user.orgId, request.user.allowedArea, params.data.id, body.data);
+      } catch (err) {
+        return fail(reply, err);
+      }
     },
   );
 
