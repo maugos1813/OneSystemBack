@@ -1,5 +1,5 @@
 import type { Vehicle } from "../db/schema/index.js";
-import { kmAfterDay, romeDay } from "./dailyKm.service.js";
+import { romeDay } from "./dailyKm.service.js";
 import type { KmContext } from "./maintenance.service.js";
 
 export type OdometerMode = "auto" | "manual";
@@ -70,12 +70,24 @@ export function resolveOdometer(vehicle: OdometerInput, ctx: OdometerContext, no
   }
   if (ctx.obdKm !== null) return { ...shared, mode, km: ctx.obdKm, source: "obd", gpsKmSinceBase: null, needsCheck: false };
   if (vehicle.odometerBaseKm !== null && vehicle.odometerBaseAt) {
-    // The days after the reading's day, plus what that day drove after the moment of the reading.
-    const since = Math.round(kmAfterDay(ctx.daily, romeDay(vehicle.odometerBaseAt)) + (ctx.baseDayKmRaw ?? 0) * (ctx.factor ?? 1));
+    const since = Math.round(rawKmSinceBase(vehicle.odometerBaseAt, ctx) * (ctx.factor ?? 1));
     const needsCheck = shared.daysSinceBase !== null && shared.daysSinceBase >= RECHECK_AFTER_DAYS;
     return { ...shared, mode, km: vehicle.odometerBaseKm + since, source: "gps", gpsKmSinceBase: since, needsCheck };
   }
   return { ...shared, mode, km: null, source: "none", gpsKmSinceBase: null, needsCheck: false };
+}
+
+/**
+ * The GPS km (before the vehicle's correction) driven since the dashboard km were typed, to the minute: the whole days in
+ * between from the daily totals, plus what the day of the reading drove after it and what today has driven so far, both
+ * worked out from the positions themselves (a day's total also holds the km before the reading, and today's is refreshed
+ * only every half hour). Without `ctx.today` (no live part known) every day after the reading counts.
+ */
+export function rawKmSinceBase(baseAt: Date, ctx: Pick<KmContext, "rawDaily" | "daily" | "baseDayKmRaw" | "liveKmRaw" | "today">): number {
+  const baseDay = romeDay(baseAt);
+  let km = 0;
+  for (const row of ctx.rawDaily ?? ctx.daily) if (row.day > baseDay && (!ctx.today || row.day < ctx.today)) km += row.km;
+  return km + (ctx.baseDayKmRaw ?? 0) + (ctx.liveKmRaw ?? 0);
 }
 
 /**
@@ -85,10 +97,10 @@ export function resolveOdometer(vehicle: OdometerInput, ctx: OdometerContext, no
 export function learnKmFactor(
   vehicle: Pick<Vehicle, "odometerBaseKm" | "odometerBaseAt">,
   typedKm: number,
-  ctx: Pick<KmContext, "rawDaily" | "daily" | "obdKm" | "baseDayKmRaw">,
+  ctx: Pick<KmContext, "rawDaily" | "daily" | "obdKm" | "baseDayKmRaw" | "liveKmRaw" | "today">,
 ): { ratio: number; trusted: boolean } | null {
   if (ctx.obdKm !== null || vehicle.odometerBaseKm === null || !vehicle.odometerBaseAt) return null;
-  const counted = kmAfterDay(ctx.rawDaily ?? ctx.daily, romeDay(vehicle.odometerBaseAt)) + (ctx.baseDayKmRaw ?? 0);
+  const counted = rawKmSinceBase(vehicle.odometerBaseAt, ctx);
   const driven = typedKm - vehicle.odometerBaseKm;
   if (counted < MIN_KM_TO_LEARN || driven <= 0) return null;
   const ratio = driven / counted;

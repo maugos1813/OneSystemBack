@@ -74,8 +74,13 @@ export interface KmContext {
   rawDaily?: DailyKm[];
   /** The vehicle's own km (see odometer.ts), when it has them: the one number every plan is measured against. */
   vehicleKm?: number | null;
-  /** The GPS km (before the vehicle's correction) driven on the day the dashboard km were typed, after that moment. */
+  /** The GPS km (before the vehicle's correction) driven on the day the dashboard km were typed, after that moment
+   * (when that day is already over; it is `liveKmRaw` while it is today). */
   baseDayKmRaw?: number;
+  /** The GPS km driven today so far (since the reading, when it was typed today), worked out from the positions. */
+  liveKmRaw?: number;
+  /** Today in Rome: the day whose daily total is not used (it is refreshed only every half hour). */
+  today?: string;
 }
 
 export interface PlanKm {
@@ -165,23 +170,29 @@ export function correctedKm(trackerKm: number | null, offsetKm: number): number 
 }
 
 /**
- * The GPS km driven on the day the dashboard km were typed, after the moment they were typed: the daily totals leave that
- * whole day out (they hold the km before the reading too), so without this a vehicle's km would not move until the next
- * day. Worked out from the stored positions; once the day is over it is kept, because the positions do not stay forever.
+ * The GPS km a vehicle has driven since its dashboard km were typed that the daily totals cannot give, from the stored
+ * positions: what the reading's day drove after the moment of the reading (kept once that day is over, because positions do
+ * not stay forever) and what today has driven so far (the day's total is refreshed only every half hour, this is as live as
+ * the positions are).
  */
-async function baseDayKm(vehicle: Vehicle, now: Date): Promise<number> {
+async function liveKm(vehicle: Vehicle, now: Date): Promise<{ baseDayKmRaw: number; liveKmRaw: number }> {
   const at = vehicle.odometerBaseAt;
-  if (!at || vehicle.odometerBaseKm === null || !vehicle.deviceId || vehicle.odometerMode === "manual") return 0;
-  if (vehicle.odometerBaseDayKm !== null) return vehicle.odometerBaseDayKm;
-  const day = romeDay(at);
-  const dayEnd = startOfRomeDay(addDays(day, 1));
-  const km = await kmBetween(vehicle.id, at, now.getTime() < dayEnd.getTime() ? now : dayEnd);
-  const complete = now.getTime() >= dayEnd.getTime();
-  // Within the week positions are kept: that is when the finished day can still be added up and saved.
-  if (complete && now.getTime() - at.getTime() < 6 * 86_400_000) {
-    await db.update(vehicles).set({ odometerBaseDayKm: km }).where(eq(vehicles.id, vehicle.id)).catch(() => undefined);
+  const none = { baseDayKmRaw: 0, liveKmRaw: 0 };
+  if (!at || vehicle.odometerBaseKm === null || !vehicle.deviceId || vehicle.odometerMode === "manual") return none;
+
+  const today = romeDay(now);
+  if (romeDay(at) >= today) return { baseDayKmRaw: 0, liveKmRaw: await kmBetween(vehicle.id, at, now) };
+
+  const dayEnd = startOfRomeDay(addDays(romeDay(at), 1));
+  let baseDayKmRaw = vehicle.odometerBaseDayKm;
+  if (baseDayKmRaw === null) {
+    baseDayKmRaw = await kmBetween(vehicle.id, at, dayEnd);
+    // Within the week positions are kept: that is when the finished day can still be added up and saved.
+    if (now.getTime() - at.getTime() < 6 * 86_400_000) {
+      await db.update(vehicles).set({ odometerBaseDayKm: baseDayKmRaw }).where(eq(vehicles.id, vehicle.id)).catch(() => undefined);
+    }
   }
-  return km;
+  return { baseDayKmRaw, liveKmRaw: await kmBetween(vehicle.id, startOfRomeDay(today), now) };
 }
 
 export async function kmContexts(vehicles: Vehicle[], now: Date = new Date()): Promise<Map<string, KmContext & { obdRaw: number | null }>> {
@@ -194,8 +205,8 @@ export async function kmContexts(vehicles: Vehicle[], now: Date = new Date()): P
       // Every km counted by GPS (plans, the vehicle's km) goes through the vehicle's learned correction.
       const rows = factor === 1 ? rawDaily : rawDaily.map((d) => ({ day: d.day, km: d.km * factor }));
       const obdKm = correctedKm(obdRaw, vehicle.odometerOffsetKm);
-      const baseDayKmRaw = obdKm === null ? await baseDayKm(vehicle, now) : 0;
-      const ctx = { obdRaw, obdKm, daily: rows, rawDaily, factor, baseDayKmRaw, coverageFrom: rawDaily[0]?.day ?? null };
+      const live = obdKm === null ? await liveKm(vehicle, now) : { baseDayKmRaw: 0, liveKmRaw: 0 };
+      const ctx = { obdRaw, obdKm, daily: rows, rawDaily, factor, ...live, today: romeDay(now), coverageFrom: rawDaily[0]?.day ?? null };
       return [vehicle.id, { ...ctx, vehicleKm: resolveOdometer(vehicle, ctx).km }] as const;
     }),
   );

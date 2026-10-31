@@ -167,6 +167,26 @@ describe("counting from the moment the km were typed, not from the next day", ()
     expect((await profile.getVehicleProfile(ORG, null, V_GPS, LATER)).odometer.km).toBe(before);
   });
 
+  it("today is counted live from the positions, not from today's total (which is refreshed only every half hour)", async () => {
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50000 }, new Date("2026-10-15T08:00:00Z"));
+    await drive("2026-10-15T08:05:00Z", 10); // ~10 km after the reading, on the day of it
+    await day(V_GPS, "2026-10-16", 100); // a whole day in between
+    await day(V_GPS, "2026-10-17", 3); // today's total, stale: it must not be the one used
+    await drive("2026-10-17T07:00:00Z", 20); // ~20 km driven today so far
+    const km = (await profile.getVehicleProfile(ORG, null, V_GPS, new Date("2026-10-17T09:00:00Z"))).odometer.km!;
+    expect(km).toBeGreaterThan(50000 + 100 + 28);
+    expect(km).toBeLessThan(50000 + 100 + 32);
+  });
+
+  it("keeps counting as the vehicle drives: a later look sees more", async () => {
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50000 }, new Date("2026-10-17T08:00:00Z"));
+    await drive("2026-10-17T08:05:00Z", 10);
+    const first = (await profile.getVehicleProfile(ORG, null, V_GPS, new Date("2026-10-17T08:20:00Z"))).odometer.km!;
+    await drive("2026-10-17T08:16:00Z", 10);
+    const second = (await profile.getVehicleProfile(ORG, null, V_GPS, new Date("2026-10-17T08:40:00Z"))).odometer.km!;
+    expect(second - first).toBeGreaterThan(8);
+  });
+
   it("is not added in manual mode, which keeps exactly what was typed", async () => {
     await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "manual", km: 50000 }, new Date("2026-10-17T08:00:00Z"));
     await drive("2026-10-17T08:05:00Z", 20);
