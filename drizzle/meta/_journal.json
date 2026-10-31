@@ -225,6 +225,13 @@
       "when": 1793354405243,
       "tag": "0031_driver_directory",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793435708146,
+      "tag": "0032_vehicle_profile",
+      "breakpoints": true
     }
   ]
 }

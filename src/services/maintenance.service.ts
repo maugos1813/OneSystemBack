@@ -143,7 +143,7 @@ export function correctedKm(trackerKm: number | null, offsetKm: number): number 
   return trackerKm === null ? null : Math.max(0, trackerKm + offsetKm);
 }
 
-async function kmContexts(vehicles: Vehicle[]): Promise<Map<string, KmContext & { obdRaw: number | null }>> {
+export async function kmContexts(vehicles: Vehicle[]): Promise<Map<string, KmContext & { obdRaw: number | null }>> {
   const daily = await listDailyKm(vehicles.map((v) => v.id));
   const entries = await Promise.all(
     vehicles.map(async (vehicle) => {
@@ -175,8 +175,10 @@ export async function listMaintenance(
   orgId: string,
   allowedArea: string | null | undefined,
   now: Date = new Date(),
+  /** Only this vehicle (the one whose profile is open); it is simply absent when the caller cannot see it. */
+  onlyVehicleId?: string,
 ): Promise<VehicleMaintenanceView[]> {
-  const visible = await listVehiclesForOrg(orgId, allowedArea);
+  const visible = (await listVehiclesForOrg(orgId, allowedArea)).filter((v) => !onlyVehicleId || v.id === onlyVehicleId);
   if (visible.length === 0) return [];
 
   const plans = await db

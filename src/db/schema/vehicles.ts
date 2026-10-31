@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { integer, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { devices } from "./devices.js";
 import { organizations } from "./organizations.js";
 
@@ -17,6 +17,20 @@ export const vehicles = pgTable("vehicles", {
   // Added to the tracker's odometer to get the dashboard reading (a tracker counts from its
   // own install, not from the car's real km). Set when someone calibrates it for maintenance.
   odometerOffsetKm: integer("odometer_offset_km").notNull().default(0),
+  // The vehicle's profile ("perfil"): what it is, beyond its name, plate and device.
+  brand: varchar("brand", { length: 50 }),
+  model: varchar("model", { length: 50 }),
+  year: integer("year"),
+  /** Chassis number (telaio). */
+  vin: varchar("vin", { length: 30 }),
+  fuelType: varchar("fuel_type", { length: 20 }),
+  color: varchar("color", { length: 30 }),
+  notes: text("notes"),
+  // Its current km. "auto": counted by itself (the car's odometer when the tracker reads it, otherwise the km typed at
+  // odometerBaseAt plus what the GPS counted after that day). "manual": exactly the km typed, until someone changes it.
+  odometerMode: varchar("odometer_mode", { length: 10 }).notNull().default("auto"),
+  odometerBaseKm: integer("odometer_base_km"),
+  odometerBaseAt: timestamp("odometer_base_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

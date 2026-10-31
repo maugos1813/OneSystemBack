@@ -46,7 +46,7 @@ beforeAll(async () => {
     );
     CREATE TABLE vehicles (
       id uuid PRIMARY KEY, org_id uuid NOT NULL, name varchar(100) NOT NULL, plate varchar(20), fleet_group varchar(50),
-      device_id uuid, odometer_offset_km integer NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now()
+      device_id uuid, odometer_offset_km integer NOT NULL DEFAULT 0, brand varchar(50), model varchar(50), year integer, vin varchar(30), fuel_type varchar(20), color varchar(30), notes text, odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE positions (
       id uuid NOT NULL DEFAULT gen_random_uuid(), device_id uuid NOT NULL, ts timestamptz NOT NULL,

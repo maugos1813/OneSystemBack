@@ -9,7 +9,20 @@ import {
   updateVehicle,
 } from "../../services/vehicle.service.js";
 import { getUserModules } from "../../services/userModules.service.js";
+import { getVehicleProfile, listVehicleOdometers, ProfileError, setVehicleOdometer } from "../../services/vehicleProfile.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
+
+const profileText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullable()
+    .optional()
+    .transform((value) => (value === "" ? null : value));
+
+/** Fuel types of a vehicle's profile (the screen names them). */
+export const FUEL_TYPES = ["diesel", "petrol", "lpg", "cng", "electric", "hybrid", "other"] as const;
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -19,7 +32,21 @@ const createSchema = z.object({
   // filter the map view. Radius Velocity seeds it on first sync but never overwrites it
   // again, so a manual change here always sticks.
   fleetGroup: z.string().max(50).nullable().optional(),
+  // Profile: what the vehicle is.
+  brand: profileText(50),
+  model: profileText(50),
+  year: z.number().int().min(1950).max(2100).nullable().optional(),
+  vin: profileText(30),
+  fuelType: z.enum(FUEL_TYPES).nullable().optional(),
+  color: profileText(30),
+  notes: profileText(2000),
 });
+
+const odometerSchema = z.object({
+  mode: z.enum(["auto", "manual"]),
+  km: z.number().int().min(0).max(5_000_000).optional(),
+});
+const idParams = z.object({ id: z.string().uuid() });
 
 const updateSchema = createSchema.partial();
 
@@ -37,6 +64,12 @@ async function requireVehicleWrite(request: FastifyRequest, reply: FastifyReply)
   await reply.code(403).send({ error: "Forbidden" });
 }
 
+/** Setting the km: those who manage maintenance (manager too) and those who may edit the vehicle. */
+async function requireOdometerWrite(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (request.user.role === "manager") return;
+  return requireVehicleWrite(request, reply);
+}
+
 const isClient = (request: FastifyRequest) => request.user.role !== "owner" && request.user.role !== "admin";
 const ADMIN_ONLY = "Solo tu administrador puede asignar el dispositivo o cambiar la flota";
 
@@ -48,6 +81,48 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
     { schema: { tags: ["Vehicles"], summary: "Listar vehículos", security: AUTH } },
     async (request) => {
       return listVehiclesForOrg(request.user.orgId, request.user.allowedArea);
+    },
+  );
+
+  app.get(
+    "/vehicles/odometers",
+    { schema: { tags: ["Vehicles"], summary: "Km actual de cada vehículo visible", security: AUTH } },
+    async (request) => listVehicleOdometers(request.user.orgId, request.user.allowedArea),
+  );
+
+  app.get(
+    "/vehicles/:id/profile",
+    { schema: { tags: ["Vehicles"], summary: "Perfil del vehículo: sus datos y su kilometraje", security: AUTH } },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      if (!params.success) return reply.code(400).send({ error: "Invalid vehicle id" });
+      try {
+        return await getVehicleProfile(request.user.orgId, request.user.allowedArea, params.data.id);
+      } catch (err) {
+        if (err instanceof ProfileError) return reply.code(err.status).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  app.put(
+    "/vehicles/:id/odometer",
+    {
+      preHandler: requireOdometerWrite,
+      schema: { tags: ["Vehicles"], summary: "Fijar el km actual y si se lleva a mano o solo (automático)", security: AUTH },
+    },
+    async (request, reply) => {
+      const params = idParams.safeParse(request.params);
+      const body = odometerSchema.safeParse(request.body);
+      if (!params.success || !body.success) {
+        return reply.code(400).send({ error: body.success ? "Invalid vehicle id" : body.error.flatten() });
+      }
+      try {
+        return await setVehicleOdometer(request.user.orgId, request.user.allowedArea, params.data.id, body.data);
+      } catch (err) {
+        if (err instanceof ProfileError) return reply.code(err.status).send({ error: err.message });
+        throw err;
+      }
     },
   );
 
@@ -95,7 +170,7 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
       preHandler: requireVehicleWrite,
       schema: {
         tags: ["Vehicles"],
-        summary: "Editar un vehículo (owner/admin; un cliente solo el nombre y la patente de los suyos)",
+        summary: "Editar un vehículo (owner/admin; un cliente solo el nombre, la patente y el perfil de los suyos)",
         security: AUTH,
         body: zodToJsonSchema(updateSchema),
       },

@@ -73,7 +73,11 @@ export async function maintenanceRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/maintenance",
     { schema: { tags: ["Maintenance"], summary: "Planes de mantenimiento por vehículo, con su estado", security: AUTH } },
-    async (request) => listMaintenance(request.user.orgId, request.user.allowedArea),
+    async (request, reply) => {
+      const query = z.object({ vehicleId: z.string().uuid().optional() }).safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: "Invalid vehicle id" });
+      return listMaintenance(request.user.orgId, request.user.allowedArea, new Date(), query.data.vehicleId);
+    },
   );
 
   app.post(

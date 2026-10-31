@@ -60,8 +60,14 @@ describe("/maintenance routes", () => {
       expect((await app.inject({ method: "GET", url: "/maintenance", headers: as(role) })).statusCode, role).toBe(200);
     }
     await app.inject({ method: "GET", url: "/maintenance", headers: as("viewer", "DHL") });
-    expect(mocks.listMaintenance).toHaveBeenLastCalledWith("org-1", "DHL");
+    expect(mocks.listMaintenance).toHaveBeenLastCalledWith("org-1", "DHL", expect.any(Date), undefined);
     expect((await app.inject({ method: "GET", url: "/maintenance" })).statusCode).toBe(401);
+  });
+
+  it("can be narrowed to one vehicle (the profile that is open)", async () => {
+    await app.inject({ method: "GET", url: `/maintenance?vehicleId=${VEHICLE}`, headers: as("viewer", "DHL") });
+    expect(mocks.listMaintenance).toHaveBeenLastCalledWith("org-1", "DHL", expect.any(Date), VEHICLE);
+    expect((await app.inject({ method: "GET", url: "/maintenance?vehicleId=nope", headers: as("admin") })).statusCode).toBe(400);
   });
 
   it("only owner, admin and manager can write", async () => {
