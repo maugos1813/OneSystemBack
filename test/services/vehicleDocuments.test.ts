@@ -27,7 +27,7 @@ beforeAll(async () => {
   await clientModule.__pg.exec(`
     CREATE TABLE vehicles (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL, plate varchar(20),
-      device_id uuid, fleet_group varchar(50), odometer_offset_km integer NOT NULL DEFAULT 0, brand varchar(50), model varchar(50), year integer, vin varchar(30), fuel_type varchar(20), color varchar(30), notes text, odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
+      device_id uuid, fleet_group varchar(50), odometer_offset_km integer NOT NULL DEFAULT 0, brand varchar(50), model varchar(50), year integer, vin varchar(30), fuel_type varchar(20), color varchar(30), notes text, odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz, km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE vehicle_documents (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, vehicle_id uuid NOT NULL, kind varchar(30) NOT NULL,

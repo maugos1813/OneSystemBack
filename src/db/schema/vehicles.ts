@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { doublePrecision, integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { devices } from "./devices.js";
 import { organizations } from "./organizations.js";
 
@@ -31,6 +31,10 @@ export const vehicles = pgTable("vehicles", {
   odometerMode: varchar("odometer_mode", { length: 10 }).notNull().default("auto"),
   odometerBaseKm: integer("odometer_base_km"),
   odometerBaseAt: timestamp("odometer_base_at", { withTimezone: true }),
+  // What the GPS count is multiplied by to match the dashboard: straight lines between reports cut corners, so a vehicle
+  // counted by GPS reads a little low. Learned when someone types the dashboard km again (1 = not learned yet).
+  kmFactor: doublePrecision("km_factor").notNull().default(1),
+  kmFactorAt: timestamp("km_factor_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

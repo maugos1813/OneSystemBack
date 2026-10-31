@@ -50,6 +50,7 @@ beforeAll(async () => {
       fleet_group varchar(50), device_id uuid, odometer_offset_km integer NOT NULL DEFAULT 0,
       brand varchar(50), model varchar(50), year integer, vin varchar(30), fuel_type varchar(20), color varchar(30), notes text,
       odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz,
+      km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz,
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
@@ -96,7 +97,7 @@ describe("resolveOdometer", () => {
     coverageFrom: "2026-10-10",
     ...over,
   });
-  const vehicle = { odometerMode: "auto", odometerBaseKm: null, odometerBaseAt: null, odometerOffsetKm: 0 };
+  const vehicle = { odometerMode: "auto", odometerBaseKm: null, odometerBaseAt: null, odometerOffsetKm: 0, kmFactor: 1, kmFactorAt: null };
 
   it("is unknown until someone types the km (nothing to count from), though the GPS count is always shown", () => {
     expect(profile.resolveOdometer(vehicle, ctx())).toMatchObject({ mode: "auto", km: null, source: "none", gpsKmTotal: 180, gpsCoverageFrom: "2026-10-10" });
@@ -117,6 +118,82 @@ describe("resolveOdometer", () => {
     expect(profile.resolveOdometer(manual, ctx())).toMatchObject({ mode: "manual", km: 50000, source: "manual", gpsKmTotal: 180 });
     expect(profile.resolveOdometer(manual, ctx({ obdKm: 91234, obdRaw: 8000 }))).toMatchObject({ km: 50000, source: "manual" });
     expect(profile.resolveOdometer({ ...manual, odometerBaseKm: null }, ctx())).toMatchObject({ km: null, source: "none" });
+  });
+});
+
+describe("the check reminder", () => {
+  const ctx = { obdKm: null, obdRaw: null, daily: [], coverageFrom: null };
+  const typed = (daysAgo: number) => ({
+    odometerMode: "auto",
+    odometerBaseKm: 50000,
+    odometerBaseAt: new Date(NOW.getTime() - daysAgo * 86_400_000),
+    odometerOffsetKm: 0,
+    kmFactor: 1,
+    kmFactorAt: null,
+  });
+
+  it("asks for the dashboard km again after 30 days, for a vehicle counted by GPS", () => {
+    expect(profile.resolveOdometer(typed(29), ctx, NOW)).toMatchObject({ source: "gps", daysSinceBase: 29, needsCheck: false });
+    expect(profile.resolveOdometer(typed(30), ctx, NOW)).toMatchObject({ daysSinceBase: 30, needsCheck: true });
+  });
+
+  it("never nags a vehicle that reads its own odometer, one kept by hand, or one with no km typed", () => {
+    expect(profile.resolveOdometer(typed(90), { ...ctx, obdKm: 91000, obdRaw: 8000 }, NOW).needsCheck).toBe(false);
+    expect(profile.resolveOdometer({ ...typed(90), odometerMode: "manual" }, ctx, NOW).needsCheck).toBe(false);
+    expect(profile.resolveOdometer({ ...typed(90), odometerBaseKm: null, odometerBaseAt: null }, ctx, NOW)).toMatchObject({ needsCheck: false, daysSinceBase: null });
+  });
+});
+
+describe("learnKmFactor", () => {
+  const base = { odometerBaseKm: 50000, odometerBaseAt: new Date("2026-10-01T10:00:00Z") };
+  const rawDaily = [
+    { day: "2026-10-01", km: 90 }, // the day of the reading is already in it
+    { day: "2026-10-05", km: 200 },
+    { day: "2026-10-09", km: 300 },
+  ];
+  const ctx = { obdKm: null, rawDaily, daily: rawDaily };
+
+  it("is the real distance over the counted one since the last reading", () => {
+    expect(profile.learnKmFactor(base, 50515, ctx)).toEqual({ ratio: 1.03, trusted: true });
+  });
+
+  it("learns nothing from a short stretch, a car whose odometer is read, or no earlier reading", () => {
+    expect(profile.learnKmFactor(base, 50515, { ...ctx, rawDaily: [{ day: "2026-10-05", km: 120 }] })).toBeNull();
+    expect(profile.learnKmFactor(base, 50515, { ...ctx, obdKm: 91000 })).toBeNull();
+    expect(profile.learnKmFactor({ odometerBaseKm: null, odometerBaseAt: null }, 50515, ctx)).toBeNull();
+    expect(profile.learnKmFactor(base, 49000, ctx)).toBeNull();
+  });
+
+  it("does not trust a difference too big to be the GPS's habit (a typo, or a long gap in the track)", () => {
+    expect(profile.learnKmFactor(base, 52500, ctx)).toMatchObject({ trusted: false });
+    expect(profile.learnKmFactor(base, 50300, ctx)).toMatchObject({ trusted: false });
+  });
+});
+
+describe("the vehicle's correction", () => {
+  it("is learned when the dashboard km are typed again, and then scales what the GPS counts", async () => {
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50000 }, new Date("2026-10-01T10:00:00Z"));
+    await day(V_GPS, "2026-10-05", 200);
+    await day(V_GPS, "2026-10-09", 300);
+    const view = await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50515 }, new Date("2026-10-10T10:00:00Z"));
+    expect(view).toMatchObject({ km: 50515, kmFactor: 1.03, factorResult: "updated" });
+    await day(V_GPS, "2026-10-12", 100);
+    // 100 km counted on the road since the reading: the correction makes it 103
+    expect((await profile.getVehicleProfile(ORG, null, V_GPS)).odometer).toMatchObject({ km: 50618, gpsKmSinceBase: 103 });
+  });
+
+  it("is left as it was when the difference is too big, and the person is told", async () => {
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50000 }, new Date("2026-10-01T10:00:00Z"));
+    await day(V_GPS, "2026-10-05", 500);
+    const view = await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 52000 }, new Date("2026-10-10T10:00:00Z"));
+    expect(view).toMatchObject({ km: 52000, kmFactor: 1, factorResult: "outOfRange" });
+  });
+
+  it("is not learned from a manual save", async () => {
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50000 }, new Date("2026-10-01T10:00:00Z"));
+    await day(V_GPS, "2026-10-05", 500);
+    const view = await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "manual", km: 50515 }, new Date("2026-10-10T10:00:00Z"));
+    expect(view).toMatchObject({ kmFactor: 1, factorResult: null });
   });
 });
 

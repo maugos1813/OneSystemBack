@@ -68,6 +68,9 @@ export interface KmContext {
   daily: DailyKm[];
   /** The first day the GPS has a total for. */
   coverageFrom: string | null;
+  /** The vehicle's GPS correction already applied to `daily` (1 when it has none), and the totals before it. */
+  factor?: number;
+  rawDaily?: DailyKm[];
 }
 
 export interface PlanKm {
@@ -150,10 +153,13 @@ export async function kmContexts(vehicles: Vehicle[]): Promise<Map<string, KmCon
   const entries = await Promise.all(
     vehicles.map(async (vehicle) => {
       const obdRaw = await readObdKm(vehicle);
-      const rows = daily.get(vehicle.id) ?? [];
+      const rawDaily = daily.get(vehicle.id) ?? [];
+      const factor = vehicle.kmFactor;
+      // Every km counted by GPS (plans, the vehicle's km) goes through the vehicle's learned correction.
+      const rows = factor === 1 ? rawDaily : rawDaily.map((d) => ({ day: d.day, km: d.km * factor }));
       return [
         vehicle.id,
-        { obdRaw, obdKm: correctedKm(obdRaw, vehicle.odometerOffsetKm), daily: rows, coverageFrom: rows[0]?.day ?? null },
+        { obdRaw, obdKm: correctedKm(obdRaw, vehicle.odometerOffsetKm), daily: rows, rawDaily, factor, coverageFrom: rawDaily[0]?.day ?? null },
       ] as const;
     }),
   );
