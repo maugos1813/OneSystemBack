@@ -35,6 +35,10 @@ export const vehicles = pgTable("vehicles", {
   // counted by GPS reads a little low. Learned when someone types the dashboard km again (1 = not learned yet).
   kmFactor: doublePrecision("km_factor").notNull().default(1),
   kmFactorAt: timestamp("km_factor_at", { withTimezone: true }),
+  // The GPS km driven on the day the dashboard km were typed, after the moment they were typed (the day's daily total
+  // also holds the km before it, which the reading already includes). Kept once that day is over, while the positions that
+  // say it are still stored; until then it is worked out live.
+  odometerBaseDayKm: doublePrecision("odometer_base_day_km"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

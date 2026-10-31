@@ -1,0 +1,1 @@
+ALTER TABLE "vehicles" ADD COLUMN "odometer_base_day_km" double precision;

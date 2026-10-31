@@ -239,6 +239,13 @@
       "when": 1793438609499,
       "tag": "0033_vehicle_km_factor",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793439691802,
+      "tag": "0034_vehicle_base_day_km",
+      "breakpoints": true
     }
   ]
 }

@@ -9,7 +9,7 @@ import {
   type Vehicle,
 } from "../db/schema/index.js";
 import type { Language } from "./i18n.js";
-import { addDays, kmAfterDay, listDailyKm, romeDay, type DailyKm } from "./dailyKm.service.js";
+import { addDays, kmAfterDay, kmBetween, listDailyKm, romeDay, startOfRomeDay, type DailyKm } from "./dailyKm.service.js";
 import { resolveOdometer } from "./odometer.js";
 import { computePlanStatus, oemOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
 import { getLatestOdometerReading, getLatestReading } from "./position.service.js";
@@ -74,6 +74,8 @@ export interface KmContext {
   rawDaily?: DailyKm[];
   /** The vehicle's own km (see odometer.ts), when it has them: the one number every plan is measured against. */
   vehicleKm?: number | null;
+  /** The GPS km (before the vehicle's correction) driven on the day the dashboard km were typed, after that moment. */
+  baseDayKmRaw?: number;
 }
 
 export interface PlanKm {
@@ -162,7 +164,27 @@ export function correctedKm(trackerKm: number | null, offsetKm: number): number 
   return trackerKm === null ? null : Math.max(0, trackerKm + offsetKm);
 }
 
-export async function kmContexts(vehicles: Vehicle[]): Promise<Map<string, KmContext & { obdRaw: number | null }>> {
+/**
+ * The GPS km driven on the day the dashboard km were typed, after the moment they were typed: the daily totals leave that
+ * whole day out (they hold the km before the reading too), so without this a vehicle's km would not move until the next
+ * day. Worked out from the stored positions; once the day is over it is kept, because the positions do not stay forever.
+ */
+async function baseDayKm(vehicle: Vehicle, now: Date): Promise<number> {
+  const at = vehicle.odometerBaseAt;
+  if (!at || vehicle.odometerBaseKm === null || !vehicle.deviceId || vehicle.odometerMode === "manual") return 0;
+  if (vehicle.odometerBaseDayKm !== null) return vehicle.odometerBaseDayKm;
+  const day = romeDay(at);
+  const dayEnd = startOfRomeDay(addDays(day, 1));
+  const km = await kmBetween(vehicle.id, at, now.getTime() < dayEnd.getTime() ? now : dayEnd);
+  const complete = now.getTime() >= dayEnd.getTime();
+  // Within the week positions are kept: that is when the finished day can still be added up and saved.
+  if (complete && now.getTime() - at.getTime() < 6 * 86_400_000) {
+    await db.update(vehicles).set({ odometerBaseDayKm: km }).where(eq(vehicles.id, vehicle.id)).catch(() => undefined);
+  }
+  return km;
+}
+
+export async function kmContexts(vehicles: Vehicle[], now: Date = new Date()): Promise<Map<string, KmContext & { obdRaw: number | null }>> {
   const daily = await listDailyKm(vehicles.map((v) => v.id));
   const entries = await Promise.all(
     vehicles.map(async (vehicle) => {
@@ -171,7 +193,9 @@ export async function kmContexts(vehicles: Vehicle[]): Promise<Map<string, KmCon
       const factor = vehicle.kmFactor;
       // Every km counted by GPS (plans, the vehicle's km) goes through the vehicle's learned correction.
       const rows = factor === 1 ? rawDaily : rawDaily.map((d) => ({ day: d.day, km: d.km * factor }));
-      const ctx = { obdRaw, obdKm: correctedKm(obdRaw, vehicle.odometerOffsetKm), daily: rows, rawDaily, factor, coverageFrom: rawDaily[0]?.day ?? null };
+      const obdKm = correctedKm(obdRaw, vehicle.odometerOffsetKm);
+      const baseDayKmRaw = obdKm === null ? await baseDayKm(vehicle, now) : 0;
+      const ctx = { obdRaw, obdKm, daily: rows, rawDaily, factor, baseDayKmRaw, coverageFrom: rawDaily[0]?.day ?? null };
       return [vehicle.id, { ...ctx, vehicleKm: resolveOdometer(vehicle, ctx).km }] as const;
     }),
   );

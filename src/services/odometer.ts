@@ -48,7 +48,7 @@ type OdometerContext = KmContext & { obdRaw: number | null };
 
 /**
  * The vehicle's current km. Manual: what was typed. Automatic: the car's odometer when the tracker reads it (already
- * lined up with the dashboard by its correction), otherwise the km typed plus the GPS km driven after that day.
+ * lined up with the dashboard by its correction), otherwise the km typed plus the GPS km driven since the moment they were typed.
  */
 export function resolveOdometer(vehicle: OdometerInput, ctx: OdometerContext, now: Date = new Date()): OdometerView {
   const mode: OdometerMode = vehicle.odometerMode === "manual" ? "manual" : "auto";
@@ -70,8 +70,8 @@ export function resolveOdometer(vehicle: OdometerInput, ctx: OdometerContext, no
   }
   if (ctx.obdKm !== null) return { ...shared, mode, km: ctx.obdKm, source: "obd", gpsKmSinceBase: null, needsCheck: false };
   if (vehicle.odometerBaseKm !== null && vehicle.odometerBaseAt) {
-    // Counting starts the day after the reading, like the maintenance plans: the same day's driving is already in it.
-    const since = Math.round(kmAfterDay(ctx.daily, romeDay(vehicle.odometerBaseAt)));
+    // The days after the reading's day, plus what that day drove after the moment of the reading.
+    const since = Math.round(kmAfterDay(ctx.daily, romeDay(vehicle.odometerBaseAt)) + (ctx.baseDayKmRaw ?? 0) * (ctx.factor ?? 1));
     const needsCheck = shared.daysSinceBase !== null && shared.daysSinceBase >= RECHECK_AFTER_DAYS;
     return { ...shared, mode, km: vehicle.odometerBaseKm + since, source: "gps", gpsKmSinceBase: since, needsCheck };
   }
@@ -85,10 +85,10 @@ export function resolveOdometer(vehicle: OdometerInput, ctx: OdometerContext, no
 export function learnKmFactor(
   vehicle: Pick<Vehicle, "odometerBaseKm" | "odometerBaseAt">,
   typedKm: number,
-  ctx: Pick<KmContext, "rawDaily" | "daily" | "obdKm">,
+  ctx: Pick<KmContext, "rawDaily" | "daily" | "obdKm" | "baseDayKmRaw">,
 ): { ratio: number; trusted: boolean } | null {
   if (ctx.obdKm !== null || vehicle.odometerBaseKm === null || !vehicle.odometerBaseAt) return null;
-  const counted = kmAfterDay(ctx.rawDaily ?? ctx.daily, romeDay(vehicle.odometerBaseAt));
+  const counted = kmAfterDay(ctx.rawDaily ?? ctx.daily, romeDay(vehicle.odometerBaseAt)) + (ctx.baseDayKmRaw ?? 0);
   const driven = typedKm - vehicle.odometerBaseKm;
   if (counted < MIN_KM_TO_LEARN || driven <= 0) return null;
   const ratio = driven / counted;

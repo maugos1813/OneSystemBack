@@ -29,11 +29,16 @@ export interface VehicleProfile {
   odometer: OdometerView;
 }
 
-export async function getVehicleProfile(orgId: string, allowedArea: string | null | undefined, vehicleId: string): Promise<VehicleProfile> {
+export async function getVehicleProfile(
+  orgId: string,
+  allowedArea: string | null | undefined,
+  vehicleId: string,
+  now: Date = new Date(),
+): Promise<VehicleProfile> {
   const vehicle = await getVehicleForOrg(orgId, vehicleId, allowedArea);
   if (!vehicle) throw new ProfileError(404, "Vehicle not found");
-  const ctx = (await kmContexts([vehicle])).get(vehicle.id)!;
-  return { vehicle, odometer: resolveOdometer(vehicle, ctx) };
+  const ctx = (await kmContexts([vehicle], now)).get(vehicle.id)!;
+  return { vehicle, odometer: resolveOdometer(vehicle, ctx, now) };
 }
 
 export interface VehicleOdometerRow {
@@ -45,10 +50,13 @@ export interface VehicleOdometerRow {
 }
 
 /** The current km of every vehicle the caller can see, for the vehicles list. */
-export async function listVehicleOdometers(orgId: string, allowedArea: string | null | undefined): Promise<VehicleOdometerRow[]> {
+export async function listVehicleOdometers(
+  orgId: string,
+  allowedArea: string | null | undefined,
+  now: Date = new Date(),
+): Promise<VehicleOdometerRow[]> {
   const visible = await listVehiclesForOrg(orgId, allowedArea);
-  const contexts = await kmContexts(visible);
-  const now = new Date();
+  const contexts = await kmContexts(visible, now);
   return visible.map((vehicle) => {
     const view = resolveOdometer(vehicle, contexts.get(vehicle.id)!, now);
     return { vehicleId: vehicle.id, km: view.km, source: view.source, mode: view.mode, needsCheck: view.needsCheck };
@@ -81,7 +89,7 @@ export async function setVehicleOdometer(
   }
 
   // Typing the dashboard km again, the GPS can see how far off it was: that becomes this vehicle's correction.
-  const learned = typed && input.mode === "auto" ? learnKmFactor(vehicle, input.km!, (await kmContexts([vehicle])).get(vehicleId)!) : null;
+  const learned = typed && input.mode === "auto" ? learnKmFactor(vehicle, input.km!, (await kmContexts([vehicle], now)).get(vehicleId)!) : null;
 
   if (typed && input.mode === "auto") {
     try {
@@ -96,12 +104,12 @@ export async function setVehicleOdometer(
     .update(vehicles)
     .set({
       odometerMode: input.mode,
-      ...(typed ? { odometerBaseKm: input.km!, odometerBaseAt: now } : {}),
+      ...(typed ? { odometerBaseKm: input.km!, odometerBaseAt: now, odometerBaseDayKm: null } : {}),
       ...(learned?.trusted ? { kmFactor: Math.round(learned.ratio * 1000) / 1000, kmFactorAt: now } : {}),
     })
     .where(eq(vehicles.id, vehicleId))
     .returning();
-  const ctx = (await kmContexts([row!])).get(vehicleId)!;
+  const ctx = (await kmContexts([row!], now)).get(vehicleId)!;
   const factorResult = learned ? (learned.trusted ? "updated" : "outOfRange") : null;
   return { ...resolveOdometer(row!, ctx, now), factorResult };
 }

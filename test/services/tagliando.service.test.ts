@@ -50,7 +50,7 @@ beforeAll(async () => {
       fleet_group varchar(50), device_id uuid, odometer_offset_km integer NOT NULL DEFAULT 0,
       brand varchar(50), model varchar(50), year integer, vin varchar(30), fuel_type varchar(20), color varchar(30), notes text,
       odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz,
-      km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz,
+      km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz, odometer_base_day_km double precision,
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);

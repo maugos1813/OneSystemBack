@@ -76,6 +76,49 @@ export async function recomputeDailyKm(fromDay: string): Promise<number> {
   return rows[0]?.written ?? 0;
 }
 
+/** The start of a Rome calendar day, as an instant. */
+export function startOfRomeDay(day: string): Date {
+  // Rome is UTC+1 or +2: the instant is within a few hours of UTC midnight, found by checking which day it falls on.
+  for (const hour of [0, 1, 2, 22, 23]) {
+    const candidate = new Date(`${addDays(day, hour >= 22 ? -1 : 0)}T${String(hour).padStart(2, "0")}:00:00Z`);
+    const previous = new Date(candidate.getTime() - 60_000);
+    if (romeDay(candidate) === day && romeDay(previous) !== day) return candidate;
+  }
+  return new Date(`${day}T00:00:00Z`);
+}
+
+/**
+ * The km a vehicle drove between two instants, added up from its stored positions the way the daily totals are. For a
+ * stretch the daily totals cannot give: the part of a day after a given moment (and today, which they refresh only every
+ * half hour). Zero when the positions of that stretch are no longer stored.
+ */
+export async function kmBetween(vehicleId: string, from: Date, to: Date): Promise<number> {
+  if (to.getTime() <= from.getTime()) return 0;
+  const { rows } = await db.execute<{ km: number }>(sql`
+    with s as (
+      select p.ts, p.lat, p.lng, p.speed,
+             lag(p.ts) over w as p_ts, lag(p.lat) over w as p_lat, lag(p.lng) over w as p_lng, lag(p.speed) over w as p_speed
+      from positions p
+      where p.device_id = (select device_id from vehicles where id = ${vehicleId})
+        and p.ts >= ${from.toISOString()}::timestamptz and p.ts < ${to.toISOString()}::timestamptz and (p.lat <> 0 or p.lng <> 0)
+      window w as (order by p.ts)
+    ), t as (
+      select *, extract(epoch from (ts - p_ts)) as dt,
+             6371 * 2 * asin(sqrt(least(1,
+               power(sin(radians(lat - p_lat) / 2), 2)
+               + cos(radians(p_lat)) * cos(radians(lat)) * power(sin(radians(lng - p_lng) / 2), 2)))) as seg_km
+      from s
+      where p_ts is not null
+    )
+    select coalesce(sum(seg_km), 0)::float as km
+    from t
+    where dt > 0 and dt <= ${MAX_GAP_S}
+      and seg_km / (dt / 3600.0) < ${MAX_PLAUSIBLE_KMH}
+      and greatest(speed, p_speed) >= ${MIN_MOVING_KMH}
+  `);
+  return rows[0]?.km ?? 0;
+}
+
 export interface DailyKm {
   day: string;
   km: number;

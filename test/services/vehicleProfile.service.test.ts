@@ -45,12 +45,18 @@ beforeAll(async () => {
   await pg.exec(`
     CREATE TABLE organizations (id uuid PRIMARY KEY);
     CREATE TABLE devices (id uuid PRIMARY KEY);
+    CREATE TABLE positions (
+      id uuid NOT NULL DEFAULT gen_random_uuid(), device_id uuid NOT NULL, ts timestamptz NOT NULL,
+      lat double precision NOT NULL, lng double precision NOT NULL, altitude integer NOT NULL DEFAULT 0,
+      angle integer NOT NULL DEFAULT 0, satellites smallint, speed integer NOT NULL DEFAULT 0,
+      priority smallint NOT NULL DEFAULT 0, io_data jsonb NOT NULL DEFAULT '{}', PRIMARY KEY (id, ts)
+    );
     CREATE TABLE vehicles (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL, plate varchar(20),
       fleet_group varchar(50), device_id uuid, odometer_offset_km integer NOT NULL DEFAULT 0,
       brand varchar(50), model varchar(50), year integer, vin varchar(30), fuel_type varchar(20), color varchar(30), notes text,
       odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz,
-      km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz,
+      km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz, odometer_base_day_km double precision,
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
@@ -68,6 +74,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  await clientModule.__pg.exec("DELETE FROM positions");
   await db.delete(vehicleDailyKm);
   await db.delete(maintenanceRecords);
   await db.delete(maintenancePlans);
@@ -118,6 +125,52 @@ describe("resolveOdometer", () => {
     expect(profile.resolveOdometer(manual, ctx())).toMatchObject({ mode: "manual", km: 50000, source: "manual", gpsKmTotal: 180 });
     expect(profile.resolveOdometer(manual, ctx({ obdKm: 91234, obdRaw: 8000 }))).toMatchObject({ km: 50000, source: "manual" });
     expect(profile.resolveOdometer({ ...manual, odometerBaseKm: null }, ctx())).toMatchObject({ km: null, source: "none" });
+  });
+});
+
+describe("counting from the moment the km were typed, not from the next day", () => {
+  const DEV_GPS = "00000000-0000-0000-0000-0000000000d2";
+  // a straight drive north at 60 km/h: one report every 60 s is 1 km
+  const drive = (fromIso: string, minutes: number) =>
+    clientModule.__pg.exec(
+      Array.from({ length: minutes + 1 }, (_, i) => {
+        const ts = new Date(new Date(fromIso).getTime() + i * 60_000).toISOString();
+        return `INSERT INTO positions (device_id, ts, lat, lng, speed) VALUES ('${DEV_GPS}', '${ts}', ${45 + i * 0.009}, 9, 60);`;
+      }).join("\n"),
+    );
+
+  beforeEach(async () => {
+    harness.hasPosition = false; // this tracker does not read the car's own odometer
+    await clientModule.__pg.exec(`INSERT INTO devices VALUES ('${DEV_GPS}') ON CONFLICT DO NOTHING;`);
+    await db.update(vehicles).set({ deviceId: DEV_GPS }).where(eq(vehicles.id, V_GPS));
+  });
+
+  it("the same day moves as soon as the vehicle drives after the reading (what was driven before it is already in it)", async () => {
+    await drive("2026-10-17T07:00:00Z", 30); // before the reading: already in the dashboard km
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50000 }, new Date("2026-10-17T08:00:00Z"));
+    await drive("2026-10-17T08:05:00Z", 20); // ~20 km after it
+    const odometer = (await profile.getVehicleProfile(ORG, null, V_GPS, new Date("2026-10-17T08:30:00Z"))).odometer;
+    expect(odometer.source).toBe("gps");
+    expect(odometer.km).toBeGreaterThan(50017);
+    expect(odometer.km).toBeLessThan(50023);
+  });
+
+  it("the finished day is kept, so it still counts when its positions are gone", async () => {
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "auto", km: 50000 }, new Date("2026-10-15T08:00:00Z"));
+    await drive("2026-10-15T08:05:00Z", 20);
+    const LATER = new Date("2026-10-17T09:00:00Z"); // two days after the reading, so its day is over
+    const before = (await profile.getVehicleProfile(ORG, null, V_GPS, LATER)).odometer.km!;
+    expect(before).toBeGreaterThan(50017);
+    const [row] = await db.select().from(vehicles).where(eq(vehicles.id, V_GPS));
+    expect(row!.odometerBaseDayKm).not.toBeNull();
+    await clientModule.__pg.exec("DELETE FROM positions");
+    expect((await profile.getVehicleProfile(ORG, null, V_GPS, LATER)).odometer.km).toBe(before);
+  });
+
+  it("is not added in manual mode, which keeps exactly what was typed", async () => {
+    await profile.setVehicleOdometer(ORG, null, V_GPS, { mode: "manual", km: 50000 }, new Date("2026-10-17T08:00:00Z"));
+    await drive("2026-10-17T08:05:00Z", 20);
+    expect((await profile.getVehicleProfile(ORG, null, V_GPS, new Date("2026-10-17T09:00:00Z"))).odometer.km).toBe(50000);
   });
 });
 
