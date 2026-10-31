@@ -108,6 +108,29 @@ export async function getLatestReading(deviceId: string): Promise<Position | und
   return row;
 }
 
+/** How far back to look for the last report that carried the car's own odometer. */
+const ODOMETER_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * The newest report that carries the car's own odometer (OBD, ID 389). The newest report overall is often a beacon scan
+ * or another partial record that does not, and a parked car sends few of them: the last km it showed are still its km.
+ */
+export async function getLatestOdometerReading(deviceId: string, now: Date = new Date()): Promise<Position | undefined> {
+  const [row] = await db
+    .select()
+    .from(positions)
+    .where(
+      and(
+        eq(positions.deviceId, deviceId),
+        gte(positions.ts, new Date(now.getTime() - ODOMETER_LOOKBACK_MS)),
+        sql`${positions.ioData}->>'389' is not null`,
+      ),
+    )
+    .orderBy(desc(positions.ts))
+    .limit(1);
+  return row;
+}
+
 /**
  * The latest position of a device: the newest report, with the last known location filled in
  * when that report has no fix (what trackers do themselves). Undefined when the device has no

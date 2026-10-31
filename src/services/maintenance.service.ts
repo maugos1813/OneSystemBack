@@ -11,7 +11,7 @@ import {
 import type { Language } from "./i18n.js";
 import { addDays, kmAfterDay, listDailyKm, romeDay, type DailyKm } from "./dailyKm.service.js";
 import { computePlanStatus, oemOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
-import { getLatestReading } from "./position.service.js";
+import { getLatestOdometerReading, getLatestReading } from "./position.service.js";
 import { getVehicleForOrg, listVehiclesForOrg } from "./vehicle.service.js";
 
 export class MaintenanceError extends Error {
@@ -135,8 +135,10 @@ export function toPlanView(plan: MaintenancePlan, km: PlanKm, now: Date): PlanVi
 /** The car's own odometer reading in km, or null (no device, or it does not read the car's odometer). */
 async function readObdKm(vehicle: Pick<Vehicle, "deviceId">): Promise<number | null> {
   if (!vehicle.deviceId) return null;
-  const position = await getLatestReading(vehicle.deviceId);
-  return position ? oemOdometerKm(position.ioData as Record<string, number | string>) : null;
+  const read = (position: { ioData: unknown } | undefined) =>
+    position ? oemOdometerKm(position.ioData as Record<string, number | string>) : null;
+  // The newest report often lacks the odometer (a beacon scan, an ignition event): then the last one that had it.
+  return read(await getLatestReading(vehicle.deviceId)) ?? read(await getLatestOdometerReading(vehicle.deviceId));
 }
 
 export function correctedKm(trackerKm: number | null, offsetKm: number): number | null {

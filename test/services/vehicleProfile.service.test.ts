@@ -8,7 +8,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
  * after that day. Real queries against an in-memory Postgres; only the tracker's latest position is faked.
  */
 
-const harness = vi.hoisted(() => ({ ioData: {} as Record<string, number | string>, hasPosition: true }));
+const harness = vi.hoisted(() => ({
+  ioData: {} as Record<string, number | string>,
+  hasPosition: true,
+  /** The last report that carried the odometer, when the newest one did not. */
+  earlierIoData: null as Record<string, number | string> | null,
+}));
 
 vi.mock("../../src/db/client.js", async () => {
   const schema = await import("../../src/db/schema/index.js");
@@ -18,6 +23,7 @@ vi.mock("../../src/db/client.js", async () => {
 
 vi.mock("../../src/services/position.service.js", () => ({
   getLatestReading: async () => (harness.hasPosition ? { ioData: harness.ioData } : undefined),
+  getLatestOdometerReading: async () => (harness.earlierIoData ? { ioData: harness.earlierIoData } : undefined),
 }));
 
 const clientModule = (await import("../../src/db/client.js")) as unknown as { db: ReturnType<typeof drizzle>; __pg: PGlite };
@@ -72,6 +78,7 @@ beforeEach(async () => {
     { id: V_OTHER, orgId: OTHER_ORG, name: "OTHER", fleetGroup: null, deviceId: null },
   ]);
   harness.hasPosition = true;
+  harness.earlierIoData = null;
   harness.ioData = { "389": 8000 }; // the car's own odometer, read through OBD
 });
 
@@ -143,6 +150,22 @@ describe("setVehicleOdometer", () => {
   it("does not exist for a vehicle of another organization or outside the área", async () => {
     await expect(profile.setVehicleOdometer(ORG, null, V_OTHER, { mode: "auto", km: 1 }, NOW)).rejects.toMatchObject({ status: 404 });
     await expect(profile.setVehicleOdometer(ORG, "UNIVEX", V_OBD, { mode: "auto", km: 1 }, NOW)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("the car's own odometer when the newest report does not carry it", () => {
+  it("is read from the last report that did (a beacon scan is the newest, the car's km are still its km)", async () => {
+    harness.ioData = { "385": "beacon" }; // the newest report: only a beacon scan
+    harness.earlierIoData = { "389": 23274 };
+    expect((await profile.getVehicleProfile(ORG, null, V_OBD)).odometer).toMatchObject({ mode: "auto", km: 23274, source: "obd", trackerKm: 23274 });
+    expect((await profile.listVehicleOdometers(ORG, null)).find((r) => r.vehicleId === V_OBD)).toMatchObject({ km: 23274, source: "obd" });
+  });
+
+  it("falls back to the GPS count only when no report in the lookback had it", async () => {
+    harness.ioData = { "385": "beacon" };
+    harness.earlierIoData = null;
+    await profile.setVehicleOdometer(ORG, null, V_OBD, { mode: "auto", km: 50000 }, NOW);
+    expect((await profile.getVehicleProfile(ORG, null, V_OBD)).odometer).toMatchObject({ source: "gps", km: 50000 });
   });
 });
 

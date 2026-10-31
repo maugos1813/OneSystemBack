@@ -9,7 +9,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
  * against it; any other is counted from the GPS days in vehicle_daily_km.
  */
 
-const harness = vi.hoisted(() => ({ ioData: {} as Record<string, number | string>, hasPosition: true }));
+const harness = vi.hoisted(() => ({
+  ioData: {} as Record<string, number | string>,
+  hasPosition: true,
+  /** The last report that carried the odometer, when the newest one did not. */
+  earlierIoData: null as Record<string, number | string> | null,
+}));
 
 vi.mock("../../src/db/client.js", async () => {
   const schema = await import("../../src/db/schema/index.js");
@@ -19,6 +24,7 @@ vi.mock("../../src/db/client.js", async () => {
 
 vi.mock("../../src/services/position.service.js", () => ({
   getLatestReading: async () => (harness.hasPosition ? { ioData: harness.ioData } : undefined),
+  getLatestOdometerReading: async () => (harness.earlierIoData ? { ioData: harness.earlierIoData } : undefined),
 }));
 
 const clientModule = (await import("../../src/db/client.js")) as unknown as { db: ReturnType<typeof drizzle>; __pg: PGlite };
@@ -74,6 +80,7 @@ beforeEach(async () => {
     { id: V_OTHER, orgId: OTHER_ORG, name: "OTHER", fleetGroup: null, deviceId: null },
   ]);
   harness.hasPosition = true;
+  harness.earlierIoData = null;
   harness.ioData = { "389": 8000 }; // the car's own odometer, read through OBD: 8 000 km
 });
 

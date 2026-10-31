@@ -89,3 +89,24 @@ describe("getPositionHistory with maxPoints", () => {
     expect(await position.getPositionHistory({ deviceId: DEVICE, maxPoints: 500, from: at(100_000) })).toEqual([]);
   });
 });
+
+describe("getLatestOdometerReading", () => {
+  const report = (sec: number, ioData: Record<string, unknown>) => ({ deviceId: DEVICE, ts: at(sec), lat: 45, lng: 9, altitude: 0, angle: 0, speed: 0, priority: 0, ioData });
+
+  it("skips newer reports that do not carry the car's odometer", async () => {
+    await db.insert(positions).values([
+      report(0, { "389": 23100 }),
+      report(60, { "389": 23274 }),
+      report(120, { "385": "beacon" }),
+      report(180, { "385": "beacon" }),
+    ]);
+    const found = await position.getLatestOdometerReading(DEVICE, at(300));
+    expect(found?.ioData).toEqual({ "389": 23274 });
+  });
+
+  it("looks back only a few days, and is undefined for a device that never reports it", async () => {
+    await db.insert(positions).values([report(0, { "389": 500 }), report(60, { "16": 1000 })]);
+    expect(await position.getLatestOdometerReading(DEVICE, new Date(at(0).getTime() + 4 * 24 * 3600 * 1000))).toBeUndefined();
+    expect(await position.getLatestOdometerReading("00000000-0000-0000-0000-0000000000d2", at(300))).toBeUndefined();
+  });
+});
