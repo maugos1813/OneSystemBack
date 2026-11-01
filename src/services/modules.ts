@@ -26,6 +26,8 @@ export const MODULE_TEMPLATES = {
   basico: ["mapa", "historial", "alertas"],
   estandar: ["mapa", "historial", "alertas", "analiticas", "vehiculos", "geocercas"],
   completo: ["mapa", "historial", "alertas", "analiticas", "vehiculos", "geocercas", "mantenimiento"],
+  // Recursos humanos: only the vehicles, to follow each one's tagliando.
+  recursosHumanos: ["vehiculos", "mantenimiento"],
 } as const satisfies Record<string, readonly ModuleKey[]>;
 
 /** What a client gets until the admin chooses otherwise. */
