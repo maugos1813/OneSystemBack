@@ -3,6 +3,7 @@ import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
 import { organizations, users, type Device, type Geofence, type Position, type Vehicle } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
+import { wasParkedWithEngineOff } from "./deviceSilence.js";
 import { localized, toLanguage, type Localized } from "./i18n.js";
 import { listGeofencesForOrg } from "./geofence.service.js";
 import { isInsidePolygonPath } from "./geofenceGeometry.js";
@@ -234,8 +235,12 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
         vehicle.id,
         vehicle.name,
         "offline",
-        isOffline(device.lastSeenAt, settings.alerts.deviceOfflineHours * 3_600_000),
-        localized((lang) => (lang === "it" ? `${vehicle.name} è offline` : `${vehicle.name} está desconectado`)),
+        isOffline(device.lastSeenAt, settings.alerts.deviceOfflineHours * 3_600_000) && !wasParkedWithEngineOff(position),
+        localized((lang) =>
+          lang === "it"
+            ? `${vehicle.name} non invia dati da più di ${settings.alerts.deviceOfflineHours} h`
+            : `${vehicle.name} lleva más de ${settings.alerts.deviceOfflineHours} h sin enviar datos`,
+        ),
         collector,
       );
     }
