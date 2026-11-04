@@ -71,6 +71,22 @@ Una vez conectado, el dispositivo queda registrado automáticamente en la base c
 con `POST /devices/claim { "imei": "..." }` antes de que sus posiciones aparezcan
 vinculadas a un vehículo.
 
+## Logs del servidor TCP
+
+Cada conexión de un dispositivo se puede seguir en los logs por su `conn=<id>` (6 caracteres):
+
+```
+[tcp] conn=569bb3 new connection from 127.0.0.1:55314
+[tcp] conn=569bb3 device identified imei=356307042441013 status=unclaimed reply=01
+[tcp] conn=569bb3 imei=356307042441013 avl codec=8E records=1 first=... last=... ack=1
+[tcp] conn=569bb3 imei=356307042441013 last lat=... lng=... speed=... sats=... ign=1 mov=1 vext=13200 vext_avl=66
+[tcp] conn=569bb3 device disconnected imei=356307042441013 duration=1.5 packets=1 records=1 reason=client_closed
+```
+
+Un paquete que no se puede leer (CRC, códec, longitud) sale como `warn` con el IMEI y los primeros 64
+bytes en hex. Con `DEBUG_TCP=true` se registra además cada trozo recibido y cada respuesta enviada,
+completos en hex (por defecto `false`).
+
 ## API (resumen)
 
 Documentación interactiva completa (OpenAPI/Swagger) en **`/docs`** una vez levantado el

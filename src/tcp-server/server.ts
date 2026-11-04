@@ -4,10 +4,8 @@ import { logger } from "../config/logger.js";
 import { handleDeviceConnection, type DeviceConnectionHooks } from "./connectionHandler.js";
 
 export function createTcpServer(hooks: DeviceConnectionHooks): Server {
-  const server = net.createServer((socket) => {
-    logger.info({ remote: `${socket.remoteAddress}:${socket.remotePort}` }, "new device connection");
-    handleDeviceConnection(socket, hooks);
-  });
+  // Each connection logs its own arrival (with its id) from inside the handler.
+  const server = net.createServer((socket) => handleDeviceConnection(socket, hooks));
 
   server.on("error", (err) => {
     logger.error({ err }, "TCP server error");

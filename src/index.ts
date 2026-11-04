@@ -33,8 +33,8 @@ async function main() {
     onIdentify: async (imei) => {
       // Every device is accepted and auto-registered as "unclaimed"; a user later
       // claims it into their organization via POST /devices/claim.
-      await findOrCreateDeviceByImei(imei);
-      return true;
+      const device = await findOrCreateDeviceByImei(imei);
+      return { accepted: true, registered: device.orgId !== null };
     },
 
     onPacket: async (imei, packet) => {

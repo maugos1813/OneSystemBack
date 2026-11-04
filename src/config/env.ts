@@ -13,6 +13,11 @@ const envSchema = z.object({
   // Public base URL of this API, shown as the server in the OpenAPI docs (/docs).
   PUBLIC_API_URL: z.string().default("http://localhost:3000"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+  // "true" logs every chunk the TCP server receives and every reply it sends, in full hex. Off by default: it fills Railway's logs.
+  DEBUG_TCP: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim().toLowerCase() === "true"),
   // Max requests per minute for each API key on the public /v1 API.
   PUBLIC_API_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(120),
   // Email alerts (Resend). Left unset, the alert scheduler still runs (so idling/geofence
