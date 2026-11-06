@@ -30,3 +30,8 @@ export async function openNotification(orgId: string, vehicleId: string, alertTy
 export async function resolveNotification(id: string): Promise<void> {
   await db.update(alertNotifications).set({ resolvedAt: new Date() }).where(eq(alertNotifications.id, id));
 }
+
+/** Stamps that this open episode was just announced (again), so its next reminder counts from now. */
+export async function markNotified(id: string): Promise<void> {
+  await db.update(alertNotifications).set({ lastNotifiedAt: new Date() }).where(eq(alertNotifications.id, id));
+}

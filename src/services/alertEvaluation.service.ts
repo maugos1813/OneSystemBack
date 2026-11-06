@@ -19,12 +19,13 @@ import {
   trackingGapMessage,
 } from "./deviceAlarms.js";
 import { alertsForRecipient, type AlertRecipient } from "./alertRecipients.js";
-import { alertPushMessage, sendPushToUsers } from "./push.service.js";
+import { alertPushMessage, sendPushToUsers, urgentPushMessage } from "./push.service.js";
 import { type AlertEmailItem, sendAlertDigest } from "./email.service.js";
 import { listDocumentsForOrg } from "./vehicleDocument.service.js";
 import { documentAlertMessage, documentName, documentStatus } from "./vehicleDocuments.js";
 import { resolveModules } from "./modules.js";
-import { getOpenNotification, openNotification, resolveNotification } from "./alertNotification.service.js";
+import { getOpenNotification, markNotified, openNotification, resolveNotification } from "./alertNotification.service.js";
+import { gpsNoPowerMessage, gpsSilentMessage, isReminderDue, isRunningWithoutPower, isSilentWhileMoving } from "./gpsDisconnect.js";
 import { type AlertPreferences, type OrgSettings, type WorkingHours, withDefaults } from "./settings.service.js";
 import { listPlansForOrg, maintenanceAlertMessage, planStatusesFor } from "./maintenance.service.js";
 import { listVehiclesForOrg } from "./vehicle.service.js";
@@ -110,7 +111,8 @@ function hasAnyAlertEnabled(alerts: AlertPreferences): boolean {
     alerts.excessiveIdlingEnabled ||
     alerts.geofenceEnabled ||
     alerts.deviceAlarmsEnabled ||
-    alerts.maintenanceEnabled
+    alerts.maintenanceEnabled ||
+    alerts.gpsDisconnectEnabled
   );
 }
 
@@ -129,12 +131,17 @@ async function ongoingCondition(
   isActive: boolean,
   message: Localized,
   collector: AlertEmailItem[],
+  /** `urgent`: goes out as the urgent push. `reminderMs`: while it stays active, it is announced again that often (push only). */
+  options: { urgent?: boolean; reminderMs?: number } = {},
 ): Promise<void> {
   const open = await getOpenNotification(orgId, vehicleId, type);
   if (isActive) {
     if (!open) {
       await openNotification(orgId, vehicleId, type);
-      collector.push({ vehicleName, message });
+      collector.push({ vehicleName, message, urgent: options.urgent });
+    } else if (options.reminderMs && isReminderDue(open, options.reminderMs)) {
+      await markNotified(open.id);
+      collector.push({ vehicleName, message, urgent: true, reminder: true });
     }
   } else if (open) {
     await resolveNotification(open.id);
@@ -245,6 +252,35 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
       );
     }
 
+    const gpsUrgent = settings.alerts.gpsDisconnectEnabled
+      ? { urgent: true, reminderMs: settings.alerts.gpsDisconnectReminderMinutes * 60_000 }
+      : {};
+
+    if (settings.alerts.gpsDisconnectEnabled) {
+      await ongoingCondition(
+        orgId,
+        vehicle.id,
+        vehicle.name,
+        "gps_no_power",
+        isRunningWithoutPower(position),
+        localized((lang) => gpsNoPowerMessage(vehicle.name, lang)),
+        collector,
+        gpsUrgent,
+      );
+      const silenceMs = settings.alerts.gpsDisconnectSilenceMinutes * 60_000;
+      const silentFor = device.lastSeenAt ? Math.round((now.getTime() - device.lastSeenAt.getTime()) / 60_000) : 0;
+      await ongoingCondition(
+        orgId,
+        vehicle.id,
+        vehicle.name,
+        "gps_silent",
+        isSilentWhileMoving(position, device.lastSeenAt, silenceMs, now),
+        localized((lang) => gpsSilentMessage(vehicle.name, silentFor, lang)),
+        collector,
+        gpsUrgent,
+      );
+    }
+
     if (settings.alerts.lowBatteryEnabled) {
       await ongoingCondition(
         orgId,
@@ -270,6 +306,8 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
           !!event && isAlarmActive(event.payload, alarm.avlId, event.ts, now),
           localized((lang) => alarm.alert(vehicle.name, lang)),
           collector,
+          // The tracker's own "unplugged" alarm is the same emergency as the two GPS alerts: urgent, and repeated.
+          key === "unplug" ? gpsUrgent : {},
         );
       }
 
@@ -371,8 +409,16 @@ async function evaluateOrg(orgId: string, orgName: string, settings: OrgSettings
     for (const recipient of await getAlertRecipients(orgId)) {
       const items = alertsForRecipient(collector, recipient);
       if (items.length === 0) continue;
-      await sendAlertDigest(recipient.email, orgName, items, recipient.language);
-      await sendPushToUsers([recipient.userId], alertPushMessage(orgName, items.map((item) => item.message[recipient.language] ?? item.message.es), recipient.language));
+      const text = (list: AlertEmailItem[]) => list.map((item) => item.message[recipient.language] ?? item.message.es);
+      // A reminder repeats what was already said: it never goes by email again, only as the urgent push.
+      const announced = items.filter((item) => !item.reminder);
+      const urgent = items.filter((item) => item.urgent);
+      const regular = announced.filter((item) => !item.urgent);
+      if (announced.length > 0) await sendAlertDigest(recipient.email, orgName, announced, recipient.language);
+      if (regular.length > 0) await sendPushToUsers([recipient.userId], alertPushMessage(orgName, text(regular), recipient.language));
+      if (urgent.length > 0) {
+        await sendPushToUsers([recipient.userId], urgentPushMessage(orgName, text(urgent), recipient.language, urgent.every((item) => item.reminder)));
+      }
     }
   }
 }

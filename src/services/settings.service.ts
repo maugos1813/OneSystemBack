@@ -33,6 +33,12 @@ export interface AlertPreferences {
   deviceAlarmsEnabled: boolean;
   /** Heads-up when a service plan is close to due or overdue. */
   maintenanceEnabled: boolean;
+  /** The GPS lost its power or went silent while the vehicle was moving: urgent push, repeated until it is back. */
+  gpsDisconnectEnabled: boolean;
+  /** How long a moving vehicle's tracker may stay silent before it is flagged. */
+  gpsDisconnectSilenceMinutes: number;
+  /** How often the urgent push is repeated while the GPS stays disconnected. */
+  gpsDisconnectReminderMinutes: number;
 }
 
 export interface OrgSettings {
@@ -66,6 +72,9 @@ export const DEFAULT_SETTINGS: OrgSettings = {
     geofenceEnabled: true,
     deviceAlarmsEnabled: true,
     maintenanceEnabled: true,
+    gpsDisconnectEnabled: true,
+    gpsDisconnectSilenceMinutes: 15,
+    gpsDisconnectReminderMinutes: 10,
   },
 };
 

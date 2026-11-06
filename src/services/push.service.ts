@@ -11,6 +11,8 @@ export interface PushMessage {
   body: string;
   /** Extra data the app receives with the notification (e.g. where to go when it is tapped). */
   data?: Record<string, string>;
+  /** Rings on the phone's loudest channel and replaces the previous urgent notice instead of piling up under it. */
+  urgent?: boolean;
 }
 
 interface ServiceAccount {
@@ -55,6 +57,9 @@ function isDeadToken(status: number, body: unknown): boolean {
   return status === 400 && /UNREGISTERED|INVALID_ARGUMENT.*registration token|registration token is not a valid/i.test(detail);
 }
 
+/** Android channel for the urgent notices (the app creates it, see lib/push.ts): maximum importance. */
+const URGENT_CHANNEL_ID = "alerts-urgent";
+
 async function sendOne(creds: ServiceAccount, bearer: string, token: string, message: PushMessage): Promise<"sent" | "dead" | "failed"> {
   const res = await fetch(`https://fcm.googleapis.com/v1/projects/${creds.project_id}/messages:send`, {
     method: "POST",
@@ -64,7 +69,12 @@ async function sendOne(creds: ServiceAccount, bearer: string, token: string, mes
         token,
         notification: { title: message.title, body: message.body },
         data: message.data ?? {},
-        android: { priority: "HIGH", notification: { channel_id: "alerts", sound: "default" } },
+        android: {
+          priority: "HIGH",
+          notification: message.urgent
+            ? { channel_id: URGENT_CHANNEL_ID, sound: "default", tag: "gps-disconnect", default_vibrate_timings: true, notification_priority: "PRIORITY_MAX" }
+            : { channel_id: "alerts", sound: "default" },
+        },
       },
     }),
   });
@@ -128,4 +138,15 @@ export function alertPushMessage(orgName: string, messages: readonly string[], l
     body: rest > 0 ? `${shown}\n+${rest} ${it ? "altri" : "más"}` : shown,
     data: { url: "/alertas", org: orgName },
   };
+}
+
+/** The urgent notice for a GPS that is disconnected: the same text again each reminder, so it must be unmistakable. */
+export function urgentPushMessage(orgName: string, messages: readonly string[], language: Language = "es", reminder = false): PushMessage {
+  const shown = messages.slice(0, 4).join("\n");
+  const rest = messages.length - 4;
+  const it = language === "it";
+  const title = it
+    ? `🚨 ${reminder ? "PROMEMORIA · " : ""}GPS scollegato`
+    : `🚨 ${reminder ? "RECORDATORIO · " : ""}GPS desconectado`;
+  return { title, body: rest > 0 ? `${shown}\n+${rest} ${it ? "altri" : "más"}` : shown, data: { url: "/alertas", org: orgName }, urgent: true };
 }

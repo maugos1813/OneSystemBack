@@ -17,6 +17,10 @@ export interface AlertEmailItem {
   message: Localized;
   /** The flota of the vehicle the alert is about; a client only gets the alerts of their own flota. */
   fleetGroup?: string | null;
+  /** Goes out as an urgent push (the GPS is down), besides the email. */
+  urgent?: boolean;
+  /** A repeat of an alert already announced: push only, never another email. */
+  reminder?: boolean;
 }
 
 function renderAlertEmailHtml(orgName: string, alerts: AlertEmailItem[], language: Language): string {

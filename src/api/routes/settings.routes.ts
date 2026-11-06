@@ -37,6 +37,9 @@ const alertsSchema = z
     geofenceEnabled: z.boolean(),
     deviceAlarmsEnabled: z.boolean(),
     maintenanceEnabled: z.boolean(),
+    gpsDisconnectEnabled: z.boolean(),
+    gpsDisconnectSilenceMinutes: z.number().min(5).max(240),
+    gpsDisconnectReminderMinutes: z.number().min(5).max(120),
   })
   .partial();
 
