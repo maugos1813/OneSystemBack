@@ -144,6 +144,8 @@ export interface PlatformFleet {
   devices: Device[];
   /** The latest position of each vehicle above, keyed by vehicle id. */
   positions: Record<string, Position>;
+  /** Each client's company logo by its name (`fleetGroup` above): what opens its plates on the map. Clients without one are left out. */
+  logos: Record<string, string>;
 }
 
 /**
@@ -152,7 +154,7 @@ export interface PlatformFleet {
  */
 export async function getPlatformFleet(): Promise<PlatformFleet> {
   const [orgRows, vehicleRows, deviceRows] = await Promise.all([
-    db.select({ id: organizations.id, name: organizations.name }).from(organizations),
+    db.select({ id: organizations.id, name: organizations.name, logo: organizations.logo }).from(organizations),
     db.select().from(vehicles),
     db.select().from(devices),
   ]);
@@ -200,7 +202,9 @@ export async function getPlatformFleet(): Promise<PlatformFleet> {
       if (latest) positions[vehicle.id] = latest;
     }),
   );
-  return { vehicles: fleet, devices: deviceRows, positions };
+  const logos: Record<string, string> = {};
+  for (const org of orgRows) if (org.logo) logos[org.name] = org.logo;
+  return { vehicles: fleet, devices: deviceRows, positions, logos };
 }
 
 /** Puts or removes the profile photo of any user, in any client: it is OneSystec who gives each client its identity. */

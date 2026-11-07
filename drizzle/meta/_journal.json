@@ -260,6 +260,13 @@
       "when": 1794060252472,
       "tag": "0036_spicy_nebula",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794062184041,
+      "tag": "0037_thankful_chronomancer",
+      "breakpoints": true
     }
   ]
 }
