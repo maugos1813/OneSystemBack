@@ -246,6 +246,13 @@
       "when": 1793439691802,
       "tag": "0034_vehicle_base_day_km",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794053511755,
+      "tag": "0035_lush_dracula",
+      "breakpoints": true
     }
   ]
 }

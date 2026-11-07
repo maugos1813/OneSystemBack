@@ -1,6 +1,7 @@
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { evaluateAllOrganizations } from "../services/alertEvaluation.service.js";
+import { evaluatePlatformSecurity } from "../services/platformAlerts.service.js";
 
 /** Runs the alert evaluator on a fixed interval — this process is already long-running
  * (it hosts the TCP ingestion server too), so a plain setInterval works fine; no need
@@ -11,6 +12,10 @@ export function startAlertScheduler(): void {
   const tick = () => {
     evaluateAllOrganizations().catch((err) => {
       logger.error({ err }, "Alert evaluation tick failed");
+    });
+    // OneSystec's own security watch over every device, apart from each client's alerts.
+    evaluatePlatformSecurity().catch((err) => {
+      logger.error({ err }, "Platform security watch tick failed");
     });
   };
 

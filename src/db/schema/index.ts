@@ -18,3 +18,4 @@ export * from "./pushTokens.js";
 export * from "./driverBeacons.js";
 export * from "./vehicleDailyKm.js";
 export * from "./driverDirectory.js";
+export * from "./platformAlerts.js";

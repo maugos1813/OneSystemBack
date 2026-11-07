@@ -30,6 +30,12 @@ const envSchema = z.object({
   // Comma-separated emails of the people who run the platform (OneSystec). Only they get the cross-client administration
   // (/platform/*), whatever organization their account sits in; everyone else is a client. Unset, nobody has it.
   PLATFORM_ADMIN_EMAILS: z.string().optional(),
+  // "true" also sends OneSystec's security alerts by email (needs RESEND_API_KEY). Off by default: they go by push, and the
+  // daily summary comes as one quiet push instead.
+  PLATFORM_SECURITY_EMAIL: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim().toLowerCase() === "true"),
   ALERT_EVAL_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
   // Shared secret for signing short-lived SSO tickets handed to external products
   // (e.g. Gamonal Driver/Farmacy) so a portal user doesn't have to log in twice.

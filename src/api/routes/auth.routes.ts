@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { authenticate, getCurrentUser } from "../../services/auth.service.js";
+import { recordLoginFailure } from "../../services/platformAlerts.service.js";
 import { getOrganizationBrief, isPlatformUser } from "../../services/platform.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { rateLimitLogin } from "../middlewares/loginRateLimit.js";
@@ -37,6 +38,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       const user = await authenticate(parsed.data.email, parsed.data.password);
       if (!user) {
+        // Counted for OneSystec's security watch; never allowed to break the answer.
+        await recordLoginFailure(parsed.data.email).catch(() => undefined);
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
