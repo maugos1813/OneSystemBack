@@ -22,6 +22,7 @@ import { LANGUAGES, toLanguage } from "../../services/i18n.js";
 import { MODULE_KEYS } from "../../services/modules.js";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { getUserModules } from "../../services/userModules.service.js";
+import { isUniqueViolation } from "../pgError.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
@@ -80,11 +81,6 @@ const updateEmailSchema = z.object({
 const updatePasswordSchema = z.object({
   password: z.string().min(8).max(100),
 });
-
-/** Postgres unique_violation error code; pg's driver attaches it as `.code`. */
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "23505";
-}
 
 /** Whether `requester` may edit/delete `target`'s products, área, or existence —
  * deliberately excludes self-service (a restricted user editing their own products/área

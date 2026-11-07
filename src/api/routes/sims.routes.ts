@@ -10,6 +10,7 @@ import {
   SimError,
   updateSim,
 } from "../../services/sim.service.js";
+import { isForeignKeyViolation } from "../pgError.js";
 import { requireAuth, requirePlatform, requireRole } from "../middlewares/auth.middleware.js";
 
 /**
@@ -132,7 +133,7 @@ export async function simsRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(201).send(await createSim(orgId, parsed.data));
       } catch (err) {
         // foreign_key_violation: the organization it was meant for doesn't exist.
-        if (typeof err === "object" && err !== null && "code" in err && err.code === "23503") {
+        if (isForeignKeyViolation(err)) {
           return reply.code(404).send({ error: "Organization not found" });
         }
         return sendSimError(reply, err);

@@ -10,6 +10,7 @@ import {
 } from "../../services/deviceCommand.service.js";
 import { redactDevice } from "../../services/deviceRedaction.js";
 import { isPlatformUser } from "../../services/platform.service.js";
+import { isForeignKeyViolation } from "../pgError.js";
 import { requireAuth, requirePlatform, requireRole } from "../middlewares/auth.middleware.js";
 
 const model = z.string().trim().min(1).max(50);
@@ -90,7 +91,7 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
         device = await claimDevice(orgId ?? request.user.orgId, imei, model);
       } catch (err) {
         // foreign_key_violation: the organization it was meant for doesn't exist.
-        if (typeof err === "object" && err !== null && "code" in err && err.code === "23503") {
+        if (isForeignKeyViolation(err)) {
           return reply.code(404).send({ error: "Organization not found" });
         }
         throw err;

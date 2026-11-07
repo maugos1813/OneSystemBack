@@ -4,6 +4,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
+import { isUniqueViolation } from "../pgError.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 const PLATFORM = { onRequest: requireAuth, preHandler: requirePlatform };
@@ -138,7 +139,7 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
         const { orgId, user } = await createClientOrganization(parsed.data);
         return reply.code(201).send({ orgId, userId: user.id });
       } catch (err) {
-        if (typeof err === "object" && err !== null && "code" in err && err.code === "23505") {
+        if (isUniqueViolation(err)) {
           return reply.code(409).send({ error: "Email already registered" });
         }
         throw err;

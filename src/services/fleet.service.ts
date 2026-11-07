@@ -1,6 +1,6 @@
-import { and, eq, isNotNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { fleets, users } from "../db/schema/index.js";
+import { fleets, users, vehicles } from "../db/schema/index.js";
 
 /** What a map needs of a fleet: its name and the small picture that opens each plate. */
 export interface FleetTag {
@@ -49,4 +49,35 @@ export async function setFleetLogo(orgId: string, name: string, logo: string | n
     .insert(fleets)
     .values({ orgId, name: fleet, logo, logoTag: tag })
     .onConflictDoUpdate({ target: [fleets.orgId, fleets.name], set: { logo, logoTag: tag } });
+}
+
+export class FleetVehiclesError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
+ * Chooses exactly which vehicles a fleet has: the ones given go into it (leaving whatever fleet they were in), and the ones it had that
+ * are not in the list are left without a fleet. A vehicle is in one fleet at a time. Every id must be a vehicle of this organization.
+ */
+export async function setFleetVehicles(orgId: string, fleetName: string, vehicleIds: readonly string[]): Promise<{ inFleet: number; released: number }> {
+  const fleet = clean(fleetName);
+  const ids = [...new Set(vehicleIds)];
+
+  return db.transaction(async (tx) => {
+    if (ids.length > 0) {
+      const own = await tx.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.orgId, orgId), inArray(vehicles.id, ids)));
+      if (own.length !== ids.length) throw new FleetVehiclesError("Algún vehículo no existe en esta cuenta");
+    }
+    const current = await tx
+      .select({ id: vehicles.id })
+      .from(vehicles)
+      .where(and(eq(vehicles.orgId, orgId), eq(vehicles.fleetGroup, fleet)));
+    const keep = new Set(ids);
+    const leaving = current.map((v) => v.id).filter((id) => !keep.has(id));
+    if (leaving.length > 0) await tx.update(vehicles).set({ fleetGroup: null }).where(and(eq(vehicles.orgId, orgId), inArray(vehicles.id, leaving)));
+    if (ids.length > 0) await tx.update(vehicles).set({ fleetGroup: fleet }).where(and(eq(vehicles.orgId, orgId), inArray(vehicles.id, ids)));
+    return { inFleet: ids.length, released: leaving.length };
+  });
 }
