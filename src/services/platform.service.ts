@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { devices, organizations, users, vehicles, type Device, type Position, type Vehicle } from "../db/schema/index.js";
 import { env } from "../config/env.js";
 import { registerOrganizationWithOwner } from "./auth.service.js";
+import { setFleetLogo } from "./fleet.service.js";
 import { sanitizeOrgSections } from "./modules.js";
 import { getLatestPosition } from "./position.service.js";
 
@@ -207,10 +208,19 @@ export async function getPlatformFleet(): Promise<PlatformFleet> {
   return { vehicles: fleet, devices: deviceRows, positions, logos };
 }
 
-/** Puts or removes the profile photo of any user, in any client: it is OneSystec who gives each client its identity. */
-export async function setUserLogo(userId: string, logo: string | null): Promise<{ id: string; logo: string | null } | undefined> {
-  const [updated] = await db.update(users).set({ logo }).where(eq(users.id, userId)).returning({ id: users.id, logo: users.logo });
-  return updated;
+/**
+ * Puts or removes the profile photo of any user, in any client: it is OneSystec who gives each client its identity. For an account limited
+ * to a fleet the photo is the fleet's picture on the map, so it is kept there too, with its small copy.
+ */
+export async function setUserLogo(userId: string, logo: string | null, tag: string | null = null): Promise<{ id: string; logo: string | null } | undefined> {
+  const [updated] = await db
+    .update(users)
+    .set({ logo })
+    .where(eq(users.id, userId))
+    .returning({ id: users.id, logo: users.logo, orgId: users.orgId, area: users.allowedArea });
+  if (!updated) return undefined;
+  if (updated.area) await setFleetLogo(updated.orgId, updated.area, logo, tag);
+  return { id: updated.id, logo: updated.logo };
 }
 
 /** What a client may have, set by OneSystec: the OneTrack sections and administration pages. Null lifts the limit. */

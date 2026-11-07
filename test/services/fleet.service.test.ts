@@ -7,27 +7,21 @@ vi.mock("../../src/db/client.js", async () => {
   const pg = new PGlite();
   return { db: drizzle(pg, { schema }), pool: {}, __pg: pg };
 });
-const created = vi.hoisted(() => ({ calls: [] as unknown[] }));
-vi.mock("../../src/services/teamUser.service.js", () => ({
-  createTeamMember: async (input: unknown) => {
-    created.calls.push(input);
-    return { id: "new" };
-  },
-}));
 
 const client = (await import("../../src/db/client.js")) as unknown as { __pg: PGlite };
-const { listFleetDetails, listFleetPictures, setFleetLogo, createFleetAdmin } = await import("../../src/services/fleet.service.js");
+const { listFleetPictures, setFleetLogo } = await import("../../src/services/fleet.service.js");
 const pg = client.__pg;
 
 const O1 = "11111111-1111-4111-8111-111111111111";
 const O2 = "22222222-2222-4222-8222-222222222222";
-const PNG = "data:image/png;base64,AAAA";
+const BIG = "data:image/png;base64,BIG";
+const SMALL = "data:image/png;base64,SMALL";
+const PHOTO = "data:image/png;base64,PHOTO";
 
 beforeAll(async () => {
   await pg.exec(`
     CREATE TABLE organizations (id uuid PRIMARY KEY);
-    CREATE TABLE vehicles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL DEFAULT 'v', fleet_group varchar(50));
-    CREATE TABLE users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL DEFAULT '', email varchar(255) NOT NULL, role text NOT NULL DEFAULT 'viewer', allowed_area varchar(50));
+    CREATE TABLE users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, email varchar(255) NOT NULL, logo text, allowed_area varchar(50));
     CREATE TABLE fleets (org_id uuid NOT NULL, name varchar(50) NOT NULL, logo text, logo_tag text, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (org_id, name));
   `);
 });
@@ -35,79 +29,47 @@ afterAll(async () => {
   await pg.close();
 });
 beforeEach(async () => {
-  created.calls.length = 0;
-  await pg.exec(`TRUNCATE vehicles, users, fleets, organizations`);
+  await pg.exec(`TRUNCATE users, fleets, organizations`);
   await pg.exec(`INSERT INTO organizations VALUES ('${O1}'), ('${O2}')`);
   await pg.exec(`
-    INSERT INTO vehicles (org_id, fleet_group) VALUES ('${O1}','DHL'), ('${O1}','DHL'), ('${O1}','UNIVEX'), ('${O1}', NULL), ('${O2}','OTRA');
-    INSERT INTO users (org_id, name, email, role, allowed_area) VALUES
-      ('${O1}','Dueño','dueno@x.it','owner',NULL),
-      ('${O1}','Admin DHL','dhl@x.it','manager','DHL'),
-      ('${O1}','Piazza','p@x.it','manager','PIAZZA'),
-      ('${O1}','Vacío','v@x.it','viewer','');
+    INSERT INTO users (org_id, email, logo, allowed_area) VALUES
+      ('${O1}','dueno@x.it',NULL,NULL),
+      ('${O1}','express@x.it','${PHOTO}','ONE DRIVER EXPRESS'),
+      ('${O1}','salute@x.it',NULL,'ONE DRIVER SALUTE'),
+      ('${O1}','vacio@x.it',NULL,''),
+      ('${O2}','otra@x.it',NULL,'OTRA');
   `);
 });
 
-describe("the fleets of a client, from what the system already has", () => {
-  it("lists the fleets of its vehicles and the ones its users are limited to, with their administrators", async () => {
-    const list = await listFleetDetails(O1);
-    expect(list.map((f) => f.name)).toEqual(["DHL", "PIAZZA", "UNIVEX"]);
-    const dhl = list.find((f) => f.name === "DHL")!;
-    expect(dhl.vehicles).toBe(2);
-    expect(dhl.admins.map((a) => a.email)).toEqual(["dhl@x.it"]);
-    const piazza = list.find((f) => f.name === "PIAZZA")!;
-    expect(piazza).toMatchObject({ vehicles: 0, logo: null });
-    expect(piazza.admins.map((a) => a.email)).toEqual(["p@x.it"]);
-    expect(list.find((f) => f.name === "UNIVEX")!.admins).toEqual([]);
+describe("a fleet is a team account limited to it, and its picture is that account's photo", () => {
+  it("lists the fleets of the accounts, with the account's photo when there is nothing better", async () => {
+    expect(await listFleetPictures(O1)).toEqual([
+      { name: "ONE DRIVER EXPRESS", tag: PHOTO },
+      { name: "ONE DRIVER SALUTE", tag: null },
+    ]);
   });
 
   it("never mixes in another client's fleets", async () => {
-    expect((await listFleetDetails(O2)).map((f) => f.name)).toEqual(["OTRA"]);
+    expect((await listFleetPictures(O2)).map((f) => f.name)).toEqual(["OTRA"]);
   });
 
   it("narrows the answer to one fleet for an account limited to it", async () => {
-    expect((await listFleetPictures(O1, "DHL")).map((f) => f.name)).toEqual(["DHL"]);
+    expect((await listFleetPictures(O1, "ONE DRIVER SALUTE")).map((f) => f.name)).toEqual(["ONE DRIVER SALUTE"]);
     expect(await listFleetPictures(O1, "NOPE")).toEqual([]);
   });
 
-  it("keeps a picture for a fleet, replaces it, and forgets it when removed", async () => {
-    await setFleetLogo(O1, " DHL ", PNG);
-    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBe(PNG);
-    await setFleetLogo(O1, "DHL", "data:image/png;base64,BBBB");
-    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBe("data:image/png;base64,BBBB");
-    await setFleetLogo(O1, "DHL", null);
-    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBeNull();
+  it("prefers the small copy kept with the fleet, then the full picture, then the account's photo", async () => {
+    await setFleetLogo(O1, "ONE DRIVER EXPRESS", BIG, SMALL);
+    expect((await listFleetPictures(O1)).find((f) => f.name === "ONE DRIVER EXPRESS")?.tag).toBe(SMALL);
+    await setFleetLogo(O1, " ONE DRIVER EXPRESS ", BIG);
+    expect((await listFleetPictures(O1)).find((f) => f.name === "ONE DRIVER EXPRESS")?.tag).toBe(BIG);
+    await setFleetLogo(O1, "ONE DRIVER EXPRESS", null);
+    expect((await listFleetPictures(O1)).find((f) => f.name === "ONE DRIVER EXPRESS")?.tag).toBe(PHOTO);
     expect((await pg.query(`SELECT count(*)::int n FROM fleets`)).rows).toEqual([{ n: 0 }]);
   });
 
-  it("gives the map the small copy of the picture, and the full one only when there is no small copy", async () => {
-    const SMALL = "data:image/png;base64,SMALL";
-    await setFleetLogo(O1, "DHL", PNG, SMALL);
-    await setFleetLogo(O1, "UNIVEX", PNG);
-    const pictures = await listFleetPictures(O1);
-    expect(pictures.find((f) => f.name === "DHL")?.tag).toBe(SMALL);
-    expect(pictures.find((f) => f.name === "UNIVEX")?.tag).toBe(PNG);
-    // The management list keeps the full picture and does not carry the small one.
-    const detail = (await listFleetDetails(O1)).find((f) => f.name === "DHL")!;
-    expect(detail.logo).toBe(PNG);
-    expect(detail).not.toHaveProperty("tag");
-    // Replacing the picture without a small copy drops the old small one rather than keeping a stale one.
-    await setFleetLogo(O1, "DHL", "data:image/png;base64,NEW");
-    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBe("data:image/png;base64,NEW");
-  });
-
-  it("lists a fleet that only has a picture (no vehicle, no user yet) and keeps pictures per client", async () => {
-    await setFleetLogo(O1, "NUEVA", PNG);
-    expect((await listFleetDetails(O1)).map((f) => f.name)).toContain("NUEVA");
-    expect((await listFleetDetails(O2)).map((f) => f.name)).not.toContain("NUEVA");
-  });
-});
-
-describe("the account that administers a fleet", () => {
-  it("is a manager limited to that fleet, in that client", async () => {
-    await createFleetAdmin(O1, " UNIVEX ", { name: "Ana", email: "ana@x.it", password: "12345678", language: "it" });
-    expect(created.calls).toEqual([
-      { orgId: O1, name: "Ana", email: "ana@x.it", password: "12345678", role: "manager", allowedArea: "UNIVEX", language: "it" },
-    ]);
+  it("keeps pictures per client", async () => {
+    await setFleetLogo(O1, "OTRA", BIG, SMALL);
+    expect((await listFleetPictures(O2)).find((f) => f.name === "OTRA")?.tag).toBeNull();
   });
 });

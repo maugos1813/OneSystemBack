@@ -92,9 +92,9 @@ describe("logo in the routes", () => {
     expect(mocks.updateTeamMemberLogo).not.toHaveBeenCalled();
 
     expect((await app.inject({ method: "PATCH", url, headers: as("admin"), payload: { logo: PNG } })).statusCode).toBe(200);
-    expect(mocks.updateTeamMemberLogo).toHaveBeenLastCalledWith("org-1", MEMBER, PNG);
+    expect(mocks.updateTeamMemberLogo).toHaveBeenLastCalledWith("org-1", MEMBER, PNG, null);
     await app.inject({ method: "PATCH", url, headers: as("admin"), payload: { logo: null } });
-    expect(mocks.updateTeamMemberLogo).toHaveBeenLastCalledWith("org-1", MEMBER, null);
+    expect(mocks.updateTeamMemberLogo).toHaveBeenLastCalledWith("org-1", MEMBER, null, null);
 
     mocks.getTeamMember.mockResolvedValue({ id: MEMBER, role: "owner", parentUserId: null });
     expect((await app.inject({ method: "PATCH", url, headers: as("admin"), payload: { logo: PNG } })).statusCode).toBe(403);

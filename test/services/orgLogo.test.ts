@@ -37,6 +37,7 @@ beforeAll(async () => {
     );
     CREATE TABLE user_products (user_id uuid NOT NULL, product_key varchar(50) NOT NULL);
     CREATE TABLE organization_products (org_id uuid NOT NULL, product_key varchar(50) NOT NULL);
+    CREATE TABLE fleets (org_id uuid NOT NULL, name varchar(50) NOT NULL, logo text, logo_tag text, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (org_id, name));
   `);
 });
 
@@ -97,6 +98,32 @@ describe("the logo of an organization", () => {
     await updateSettings(orgId, { orgLogo: PNG, orgLogoTag: "data:image/png;base64,TAG" });
     await updateSettings(orgId, { orgLogo: null });
     expect(await tagOf()).toBeNull();
+  });
+});
+
+describe("the photo of a team account that is a fleet", () => {
+  const fleetRow = async (orgId: string, name: string) => (await clientModule.__pg.query<{ logo: string | null; logo_tag: string | null }>("SELECT logo, logo_tag FROM fleets WHERE org_id = $1 AND name = $2", [orgId, name])).rows[0];
+
+  it("is also the fleet's picture on the map, with its small copy, when the account is created with it", async () => {
+    const { orgId } = await registerOrganizationWithOwner({ orgName: "Flota A", email: "fa@gamonal.it", password: "supersecret1" });
+    await createTeamMember({ orgId, name: "EXPRESS", email: "ex@cliente.it", password: "supersecret1", role: "viewer", allowedArea: "ONE DRIVER EXPRESS", logo: PNG, logoTag: "data:image/png;base64,TAG", productKeys: [] });
+    expect(await fleetRow(orgId, "ONE DRIVER EXPRESS")).toEqual({ logo: PNG, logo_tag: "data:image/png;base64,TAG" });
+  });
+
+  it("follows the account's photo when it is changed or removed, and ignores an account that has no fleet", async () => {
+    const { orgId } = await registerOrganizationWithOwner({ orgName: "Flota B", email: "fb@gamonal.it", password: "supersecret1" });
+    const fleet = await createTeamMember({ orgId, name: "SALUTE", email: "sa@cliente.it", password: "supersecret1", role: "viewer", allowedArea: "ONE DRIVER SALUTE", productKeys: [] });
+    const plain = await createTeamMember({ orgId, name: "Sin flota", email: "sf@cliente.it", password: "supersecret1", role: "viewer", productKeys: [] });
+
+    await updateTeamMemberLogo(orgId, fleet.id, PNG, "data:image/png;base64,SMALL");
+    expect(await fleetRow(orgId, "ONE DRIVER SALUTE")).toEqual({ logo: PNG, logo_tag: "data:image/png;base64,SMALL" });
+    await updateTeamMemberLogo(orgId, fleet.id, PNG);
+    expect(await fleetRow(orgId, "ONE DRIVER SALUTE")).toEqual({ logo: PNG, logo_tag: null });
+    await updateTeamMemberLogo(orgId, fleet.id, null);
+    expect(await fleetRow(orgId, "ONE DRIVER SALUTE")).toBeUndefined();
+
+    await updateTeamMemberLogo(orgId, plain.id, PNG);
+    expect((await clientModule.__pg.query("SELECT count(*)::int n FROM fleets WHERE org_id = $1", [orgId])).rows).toEqual([{ n: 0 }]);
   });
 });
 

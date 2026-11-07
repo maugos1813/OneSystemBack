@@ -3,6 +3,7 @@ import { db } from "../db/client.js";
 import { organizationProducts, userProducts, users, type User } from "../db/schema/index.js";
 import { hashPassword } from "./auth.service.js";
 import { toLanguage, type Language } from "./i18n.js";
+import { setFleetLogo } from "./fleet.service.js";
 import { DEFAULT_MODULES, resolveModules, sanitizeModules, type ModuleKey } from "./modules.js";
 
 export interface TeamMember {
@@ -101,6 +102,8 @@ export interface CreateTeamMemberInput {
   allowedArea?: string | null;
   /** The member's own logo as a data URL, or null/undefined for none. */
   logo?: string | null;
+  /** The small copy of that logo, for the map's plate tags (kept with the fleet when the member is limited to one). */
+  logoTag?: string | null;
   /** OneTrack sections to grant; defaults to the standard package. Owner/admin ignore it. */
   modules?: readonly string[];
   /** The member's language; Spanish when not given. */
@@ -136,6 +139,10 @@ export async function createTeamMember(input: CreateTeamMemberInput): Promise<Te
     }
 
     return toTeamMember(user!, grantedKeys);
+  }).then(async (member) => {
+    // An account limited to a fleet, created with a photo: that photo is the fleet's picture on the map.
+    if (input.logo && input.allowedArea) await setFleetLogo(input.orgId, input.allowedArea, input.logo, input.logoTag ?? null);
+    return member;
   });
 }
 
@@ -193,12 +200,17 @@ export async function updateTeamMemberArea(
   return updated;
 }
 
-export async function updateTeamMemberLogo(orgId: string, userId: string, logo: string | null): Promise<User | undefined> {
+/**
+ * The photo of a team member. For an account limited to a fleet it is the fleet's picture on the map, so it is kept there too (with the
+ * small copy made at upload): the team and the fleets are the same thing.
+ */
+export async function updateTeamMemberLogo(orgId: string, userId: string, logo: string | null, tag: string | null = null): Promise<User | undefined> {
   const [updated] = await db
     .update(users)
     .set({ logo })
     .where(and(eq(users.id, userId), eq(users.orgId, orgId)))
     .returning();
+  if (updated?.allowedArea) await setFleetLogo(orgId, updated.allowedArea, logo, tag);
   return updated;
 }
 

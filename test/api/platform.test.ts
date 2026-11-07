@@ -14,9 +14,6 @@ const mocks = vi.hoisted(() => ({
   setOrganizationSections: vi.fn(),
   setOrganizationLogo: vi.fn(),
 }));
-const fleetMocks = vi.hoisted(() => ({ listFleetDetails: vi.fn(), listFleetPictures: vi.fn(), setFleetLogo: vi.fn(), createFleetAdmin: vi.fn() }));
-vi.mock("../../src/services/fleet.service.js", () => fleetMocks);
-
 vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
   ...mocks,
@@ -155,10 +152,10 @@ describe("cross-client administration is for one account alone", () => {
       expect(mocks.setUserLogo).not.toHaveBeenCalled();
       const ok = await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "admin", "platform-user"), payload: { logo: PNG } });
       expect(ok.statusCode).toBe(200);
-      expect(mocks.setUserLogo).toHaveBeenCalledWith(USER, PNG);
+      expect(mocks.setUserLogo).toHaveBeenCalledWith(USER, PNG, null);
       const cleared = await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "admin", "platform-user"), payload: { logo: null } });
       expect(cleared.statusCode).toBe(200);
-      expect(mocks.setUserLogo).toHaveBeenLastCalledWith(USER, null);
+      expect(mocks.setUserLogo).toHaveBeenLastCalledWith(USER, null, null);
     });
 
     it("rejects a bad image or id, and answers 404 for an unknown user", async () => {
@@ -217,40 +214,6 @@ describe("cross-client administration is for one account alone", () => {
       expect((await app.inject({ method: "PATCH", url: "/platform/organizations/nope/logo", headers, payload: { logo: null } })).statusCode).toBe(400);
       mocks.setOrganizationLogo.mockResolvedValue(undefined);
       expect((await app.inject({ method: "PATCH", url, headers, payload: { logo: null } })).statusCode).toBe(404);
-    });
-  });
-
-  describe("the fleets of a client", () => {
-    const base = `/platform/organizations/${CLIENT_ORG}/fleets`;
-    const PNG =
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-
-    it("are read and set by OneSystec alone, in the chosen client", async () => {
-      fleetMocks.listFleetDetails.mockResolvedValue([]);
-      fleetMocks.setFleetLogo.mockResolvedValue({ name: "DHL", logo: PNG });
-      mocks.getOrganizationBrief.mockResolvedValue({ id: CLIENT_ORG, name: "Cliente", logo: null });
-      const other = as(SAME_ORG, "owner", "u1");
-      expect((await app.inject({ method: "GET", url: base, headers: other })).statusCode).toBe(403);
-      expect((await app.inject({ method: "PUT", url: `${base}/logo`, headers: other, payload: { name: "DHL", logo: PNG } })).statusCode).toBe(403);
-      expect(fleetMocks.setFleetLogo).not.toHaveBeenCalled();
-
-      const mine = as(SAME_ORG, "admin", "platform-user");
-      expect((await app.inject({ method: "GET", url: base, headers: mine })).statusCode).toBe(200);
-      expect(fleetMocks.listFleetDetails).toHaveBeenCalledWith(CLIENT_ORG);
-      expect((await app.inject({ method: "PUT", url: `${base}/logo`, headers: mine, payload: { name: "DHL", logo: PNG } })).statusCode).toBe(200);
-      expect(fleetMocks.setFleetLogo).toHaveBeenCalledWith(CLIENT_ORG, "DHL", PNG, null);
-    });
-
-    it("lets OneSystec create the administrator account of a fleet, and 404s for an unknown client", async () => {
-      fleetMocks.createFleetAdmin.mockResolvedValue({ id: "new" });
-      const body = { fleet: "DHL", name: "Ana", email: "ana@x.it", password: "12345678" };
-      const mine = as(SAME_ORG, "admin", "platform-user");
-      mocks.getOrganizationBrief.mockResolvedValue(undefined);
-      expect((await app.inject({ method: "POST", url: `${base}/admin`, headers: mine, payload: body })).statusCode).toBe(404);
-      mocks.getOrganizationBrief.mockResolvedValue({ id: CLIENT_ORG, name: "Cliente", logo: null });
-      expect((await app.inject({ method: "POST", url: `${base}/admin`, headers: as(SAME_ORG, "owner", "u1"), payload: body })).statusCode).toBe(403);
-      expect((await app.inject({ method: "POST", url: `${base}/admin`, headers: mine, payload: body })).statusCode).toBe(201);
-      expect(fleetMocks.createFleetAdmin).toHaveBeenCalledWith(CLIENT_ORG, "DHL", { name: "Ana", email: "ana@x.it", password: "12345678" });
     });
   });
 });

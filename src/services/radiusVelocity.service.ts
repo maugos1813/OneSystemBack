@@ -105,7 +105,14 @@ async function findOrCreateDevice(imei: string, orgId: string): Promise<{ id: st
   return created!;
 }
 
-async function syncVehicle(orgId: string, deviceId: string, plate: string, fleetGroup: string): Promise<void> {
+/**
+ * How Radius Velocity names its device groups and how the clients call those fleets: a new vehicle is seeded into the fleet by the name the
+ * client uses (the team's accounts are limited to those names), not by the provider's.
+ */
+const FLEET_ALIASES: Record<string, string> = { DHL: "ONE DRIVER EXPRESS", UNIVEX: "ONE DRIVER SALUTE" };
+
+async function syncVehicle(orgId: string, deviceId: string, plate: string, rvGroup: string): Promise<void> {
+  const fleetGroup = FLEET_ALIASES[rvGroup.trim().toUpperCase()] ?? rvGroup;
   const [existing] = await db
     .select()
     .from(vehicles)

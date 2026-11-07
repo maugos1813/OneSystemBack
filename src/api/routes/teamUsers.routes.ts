@@ -20,7 +20,7 @@ import {
 } from "../../services/teamUser.service.js";
 import { LANGUAGES, toLanguage } from "../../services/i18n.js";
 import { MODULE_KEYS } from "../../services/modules.js";
-import { logoSchema } from "../../services/orgLogo.js";
+import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { getUserModules } from "../../services/userModules.service.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
@@ -37,6 +37,7 @@ const createMemberSchema = z.object({
   role: z.enum(["admin", "manager", "viewer"]),
   allowedArea: z.string().max(50).nullable().optional(),
   logo: logoSchema.nullable().optional(),
+  logoTag: logoTagSchema.nullable().optional(),
   modules: z.array(z.enum(MODULE_KEYS)).optional(),
   language: z.enum(LANGUAGES).optional(),
   productKeys: z.array(z.string()).optional(),
@@ -68,6 +69,8 @@ const updateLanguageSchema = z.object({
 
 const updateLogoSchema = z.object({
   logo: logoSchema.nullable(),
+  /** The small copy of the logo, for the map's plate tags. */
+  tag: logoTagSchema.nullable().optional(),
 });
 
 const updateEmailSchema = z.object({
@@ -172,6 +175,7 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
           role: data.role,
           allowedArea: data.allowedArea ?? null,
           logo: data.logo ?? null,
+          logoTag: data.logoTag ?? null,
           modules: data.modules,
           language: data.language,
           productKeys: data.productKeys,
@@ -234,7 +238,7 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
       const parsed = updateLogoSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-      const updated = await updateTeamMemberLogo(request.user.orgId, id, parsed.data.logo);
+      const updated = await updateTeamMemberLogo(request.user.orgId, id, parsed.data.logo, parsed.data.logo === null ? null : (parsed.data.tag ?? null));
       if (!updated) return reply.code(404).send({ error: "User not found" });
       return { id: updated.id, logo: updated.logo };
     },

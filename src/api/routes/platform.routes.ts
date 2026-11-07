@@ -1,9 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { createFleetAdmin, listFleetDetails, setFleetLogo } from "../../services/fleet.service.js";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
-import { fleetAdminBody, fleetLogoBody, isUniqueViolation } from "./fleets.routes.js";
 import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
 
@@ -86,49 +84,6 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  // The fleets of a client: what it has, the picture of each, and the account that administers each. Same data the client sees in its own team page.
-  app.get<{ Params: { id: string } }>(
-    "/platform/organizations/:id/fleets",
-    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Las flotas de un cliente (solo OneSystec)", security: AUTH } },
-    async (request, reply) => {
-      const id = z.string().uuid().safeParse(request.params.id);
-      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
-      return listFleetDetails(id.data);
-    },
-  );
-
-  app.put<{ Params: { id: string } }>(
-    "/platform/organizations/:id/fleets/logo",
-    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Imagen de una flota de un cliente (solo OneSystec)", security: AUTH } },
-    async (request, reply) => {
-      const id = z.string().uuid().safeParse(request.params.id);
-      const body = fleetLogoBody.safeParse(request.body);
-      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
-      if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
-      if (!(await getOrganizationBrief(id.data))) return reply.code(404).send({ error: "Organization not found" });
-      return setFleetLogo(id.data, body.data.name, body.data.logo, body.data.logo === null ? null : (body.data.tag ?? null));
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    "/platform/organizations/:id/fleets/admin",
-    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Cuenta que administra una flota de un cliente (solo OneSystec)", security: AUTH } },
-    async (request, reply) => {
-      const id = z.string().uuid().safeParse(request.params.id);
-      const body = fleetAdminBody.safeParse(request.body);
-      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
-      if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
-      if (!(await getOrganizationBrief(id.data))) return reply.code(404).send({ error: "Organization not found" });
-      const { fleet, ...account } = body.data;
-      try {
-        return reply.code(201).send(await createFleetAdmin(id.data, fleet, account));
-      } catch (err) {
-        if (isUniqueViolation(err)) return reply.code(409).send({ error: "Email already registered" });
-        throw err;
-      }
-    },
-  );
-
   // The company logo of a client.
   app.patch<{ Params: { id: string } }>(
     "/platform/organizations/:id/logo",
@@ -156,10 +111,10 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const id = z.string().uuid().safeParse(request.params.userId);
-      const body = z.object({ logo: logoSchema.nullable() }).safeParse(request.body);
+      const body = z.object({ logo: logoSchema.nullable(), tag: logoTagSchema.nullable().optional() }).safeParse(request.body);
       if (!id.success) return reply.code(400).send({ error: "Invalid id" });
       if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
-      const updated = await setUserLogo(id.data, body.data.logo);
+      const updated = await setUserLogo(id.data, body.data.logo, body.data.logo === null ? null : (body.data.tag ?? null));
       if (!updated) return reply.code(404).send({ error: "User not found" });
       return updated;
     },
