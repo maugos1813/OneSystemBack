@@ -55,17 +55,18 @@ beforeEach(async () => {
 const row = (deviceId: string, ts: Date) => ({ deviceId, ts, lat: 45, lng: 9, altitude: 0, angle: 0, satellites: null, speed: 0, priority: 0, ioData: {} });
 
 describe("pruneRadiusHistory", () => {
-  it("keeps 7 days and deletes what is older, for Radius devices only", async () => {
-    expect(RADIUS_HISTORY_DAYS).toBe(7);
-    await db.insert(positions).values([row(RADIUS, daysAgo(20)), row(RADIUS, daysAgo(8)), row(RADIUS, daysAgo(6)), row(RADIUS, daysAgo(0.1))]);
+  it("keeps the 6 months of history (a safety net just past them) and deletes only what is older, for Radius devices only", async () => {
+    expect(RADIUS_HISTORY_DAYS).toBeGreaterThan(183);
+    expect(RADIUS_HISTORY_DAYS).toBeLessThanOrEqual(200);
+    await db.insert(positions).values([row(RADIUS, daysAgo(300)), row(RADIUS, daysAgo(195)), row(RADIUS, daysAgo(180)), row(RADIUS, daysAgo(8)), row(RADIUS, daysAgo(0.1))]);
     const removed = await pruneRadiusHistory(NOW);
     expect(removed).toBe(2);
     const left = await db.select().from(positions).where(eq(positions.deviceId, RADIUS));
-    expect(left.map((r) => r.ts.getTime()).sort()).toEqual([daysAgo(6).getTime(), daysAgo(0.1).getTime()].sort());
+    expect(left.map((r) => r.ts.getTime()).sort()).toEqual([daysAgo(180).getTime(), daysAgo(8).getTime(), daysAgo(0.1).getTime()].sort());
   });
 
   it("never touches a Teltonika route, however old", async () => {
-    await db.insert(positions).values([row(TELTONIKA, daysAgo(60)), row(TELTONIKA, daysAgo(10)), row(RADIUS, daysAgo(10))]);
+    await db.insert(positions).values([row(TELTONIKA, daysAgo(400)), row(TELTONIKA, daysAgo(10)), row(RADIUS, daysAgo(400))]);
     await pruneRadiusHistory(NOW);
     expect(await db.select().from(positions).where(eq(positions.deviceId, TELTONIKA))).toHaveLength(2);
     expect(await db.select().from(positions).where(eq(positions.deviceId, RADIUS))).toHaveLength(0);
@@ -86,7 +87,17 @@ describe("the retention migrations", () => {
     expect(sql).toMatch(/add_retention_policy\('device_events', INTERVAL '3 months'/);
   });
 
-  it("delay compression to 10 days so the 7-day Radius prune only touches uncompressed rows", () => {
+  it("now keep route history and events for 6 months, replacing the 3-month policies", () => {
+    const sql = read("0039_history_six_months.sql");
+    for (const table of ["positions", "device_events"]) {
+      expect(sql).toMatch(new RegExp(`remove_retention_policy\\('${table}'`));
+      expect(sql).toMatch(new RegExp(`add_retention_policy\\('${table}', INTERVAL '6 months'`));
+    }
+    // The old policy must go first, or both would stay and the shorter one would keep winning.
+    expect(sql.indexOf("remove_retention_policy('positions'")).toBeLessThan(sql.indexOf("add_retention_policy('positions'"));
+  });
+
+  it("delay compression to 10 days (the Radius prune is only a safety net now)", () => {
     const sql = read("0023_radius_compression_delay.sql");
     expect(sql).toMatch(/remove_compression_policy\('positions'/);
     expect(sql).toMatch(/add_compression_policy\('positions', INTERVAL '10 days'/);

@@ -274,6 +274,13 @@
       "when": 1794062730992,
       "tag": "0038_quiet_cyclops",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794069610917,
+      "tag": "0039_history_six_months",
+      "breakpoints": true
     }
   ]
 }

@@ -13,7 +13,7 @@ import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
  * Alertas, Analíticas). Radius Velocity is pull-only (no push/webhooks), so this is
  * driven by a poller — see jobs/radiusVelocityScheduler.ts.
  *
- * Radius keeps only RADIUS_HISTORY_DAYS of route history (see pruneRadiusHistory), Teltonika keeps 3 months.
+ * Radius and Teltonika routes are kept for 6 months (the retention policy of migration 0039); pruneRadiusHistory is only a safety net just past that.
  *
  * Radius Velocity doesn't report satellites, external/battery voltage, or odometer —
  * those are left null/absent rather than faked as 0. Only `ioData["239"]` (ignition)
@@ -131,13 +131,13 @@ async function syncVehicle(orgId: string, deviceId: string, plate: string, rvGro
   }
 }
 
-/** Radius Velocity vehicles keep a short route history: Driver reads it from here (by plate) to work out stops and the
- * real route of a service, which happens within days of the trip. Teltonika routes are kept 3 months (migration 0022). */
-export const RADIUS_HISTORY_DAYS = 7;
+/** Radius Velocity routes are kept as long as Teltonika ones: 6 months (migration 0039 drops whole chunks at that age). This cutoff sits a few
+ * days past it, so the row-by-row delete below finds nothing before the policy does and never has to touch compressed chunks. */
+export const RADIUS_HISTORY_DAYS = 190;
 
 /**
- * Deletes the route history of Radius Velocity devices older than RADIUS_HISTORY_DAYS. Compression only starts after
- * 10 days (migration 0023), so this only ever touches uncompressed rows. Returns how many rows were removed.
+ * Deletes the route history of Radius Velocity devices older than RADIUS_HISTORY_DAYS: a safety net past the 6-month retention policy,
+ * normally a no-op. Returns how many rows were removed.
  */
 export async function pruneRadiusHistory(now: Date = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - RADIUS_HISTORY_DAYS * 24 * 60 * 60 * 1000);
