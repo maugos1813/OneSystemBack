@@ -27,6 +27,9 @@ const envSchema = z.object({
   // through FCM. Left unset, alerts still show in the app and go by email; only the phone notification is skipped.
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
   ALERT_EMAIL_FROM: z.string().default("OneSystec Alertas <onboarding@resend.dev>"),
+  // Comma-separated ids of the organization(s) that run the platform (OneSystec). Only their owners/admins get the
+  // cross-client administration (/platform/*); every other organization is a client. Unset, nobody has it.
+  PLATFORM_ORG_IDS: z.string().optional(),
   ALERT_EVAL_INTERVAL_MINUTES: z.coerce.number().positive().default(5),
   // Shared secret for signing short-lived SSO tickets handed to external products
   // (e.g. Gamonal Driver/Farmacy) so a portal user doesn't have to log in twice.

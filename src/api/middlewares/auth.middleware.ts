@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { isPlatformOrg } from "../../services/platform.service.js";
 import { authenticateApiKey, looksLikeApiKey } from "../../services/apiKey.service.js";
 import type { ModuleKey } from "../../services/modules.js";
 import { getUserModules } from "../../services/userModules.service.js";
@@ -85,4 +86,15 @@ export function requireModule(...modules: ModuleKey[]) {
       await reply.code(403).send({ error: "Esta sección no está habilitada para tu cuenta" });
     }
   };
+}
+
+/**
+ * The cross-client administration is OneSystec's alone: a logged-in owner/admin of a platform organization. Not an API key
+ * (those carry the org id too, with the viewer role), and not any client's owner, whose org simply isn't on the list.
+ */
+export async function requirePlatform(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const { userId, orgId, role } = request.user;
+  if (userId === "api-key" || (role !== "owner" && role !== "admin") || !isPlatformOrg(orgId)) {
+    await reply.code(403).send({ error: "Forbidden" });
+  }
 }
