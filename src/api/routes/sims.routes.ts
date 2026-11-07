@@ -10,7 +10,7 @@ import {
   SimError,
   updateSim,
 } from "../../services/sim.service.js";
-import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
+import { requireAuth, requirePlatform, requireRole } from "../middlewares/auth.middleware.js";
 
 /**
  * SIM cards of the org's trackers. The whole section is owner/admin only and needs an
@@ -86,7 +86,8 @@ const idParams = { type: "object", properties: { id: { type: "string", format: "
 
 export async function simsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
-  const guard = [requireRole("owner", "admin"), requireOrgWideAdmin];
+  // SIMs (number, ICCID, PIN, PUK) are OneSystec's, never a client's.
+  const guard = [requireRole("owner", "admin"), requirePlatform, requireOrgWideAdmin];
 
   app.get(
     "/sims",

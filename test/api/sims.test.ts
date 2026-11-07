@@ -8,6 +8,12 @@ const mocks = vi.hoisted(() => ({
   getSimSecrets: vi.fn(),
 }));
 
+const who = vi.hoisted(() => ({ platform: true }));
+vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
+  isPlatformUser: async () => who.platform,
+}));
+
 vi.mock("../../src/services/sim.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/sim.service.js")>()),
   ...mocks,
@@ -114,6 +120,17 @@ describe("/sims routes", () => {
   beforeEach(() => {
     for (const mock of Object.values(mocks)) mock.mockReset();
     mocks.listSims.mockResolvedValue([]);
+    who.platform = true;
+  });
+
+  it("is closed to a client's owner and admin: SIMs are OneSystec's", async () => {
+    who.platform = false;
+    for (const role of ["owner", "admin"]) {
+      expect((await app.inject({ method: "GET", url: "/sims", headers: as(role) })).statusCode, role).toBe(403);
+      expect((await app.inject({ method: "POST", url: "/sims", headers: as(role), payload: {} })).statusCode, role).toBe(403);
+    }
+    expect(mocks.listSims).not.toHaveBeenCalled();
+    expect(mocks.createSim).not.toHaveBeenCalled();
   });
 
   it("is for owner and admin only", async () => {

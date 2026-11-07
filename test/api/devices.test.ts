@@ -6,11 +6,17 @@ const mocks = vi.hoisted(() => ({
   getDeviceDetail: vi.fn(),
   updateDevice: vi.fn(),
 }));
+const who = vi.hoisted(() => ({ platform: true }));
 const commandMocks = vi.hoisted(() => ({ requestImmobilizer: vi.fn(), listDeviceCommands: vi.fn() }));
 
 vi.mock("../../src/services/device.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/device.service.js")>()),
   ...mocks,
+}));
+
+vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
+  isPlatformUser: async () => who.platform,
 }));
 
 vi.mock("../../src/services/deviceCommand.service.js", async (importOriginal) => ({
@@ -64,6 +70,40 @@ describe("/devices routes", () => {
 
   beforeEach(() => {
     for (const mock of [...Object.values(mocks), ...Object.values(commandMocks)]) mock.mockReset();
+    who.platform = true;
+  });
+
+  describe("what a client may not know about its hardware", () => {
+    const RAW = { id: DEVICE_ID, imei: "860848088107876", model: "FMC003", serialNumber: "1164718028", firmware: "03.28", status: "active" };
+
+    it("hides IMEI, serial and firmware in the list from a client, and shows them to OneSystec", async () => {
+      mocks.listDevicesForOrg.mockResolvedValue([RAW]);
+      who.platform = false;
+      const client = await app.inject({ method: "GET", url: "/devices", headers: as("owner") });
+      expect(client.json()).toEqual([{ ...RAW, imei: "", serialNumber: null, firmware: null }]);
+      expect(JSON.stringify(client.json())).not.toContain("860848088107876");
+      who.platform = true;
+      const platform = await app.inject({ method: "GET", url: "/devices", headers: as("owner") });
+      expect(platform.json()).toEqual([RAW]);
+    });
+
+    it("hides the same fields and the SIM in a client's device sheet", async () => {
+      mocks.getDeviceDetail.mockResolvedValue({ device: RAW, io: [], sim: null });
+      who.platform = false;
+      const res = await app.inject({ method: "GET", url: `/devices/${DEVICE_ID}`, headers: as("owner") });
+      expect(res.json().device).toEqual({ ...RAW, imei: "", serialNumber: null, firmware: null });
+      expect(mocks.getDeviceDetail).toHaveBeenCalledWith("org-1", DEVICE_ID, { allowedArea: null, includeSim: false });
+    });
+
+    it("refuses a client claiming a device by IMEI or editing its serial/firmware", async () => {
+      who.platform = false;
+      const claim = await app.inject({ method: "POST", url: "/devices/claim", headers: as("owner"), payload: { imei: "860848088107876" } });
+      const edit = await app.inject({ method: "PATCH", url: `/devices/${DEVICE_ID}`, headers: as("owner"), payload: { model: "FMC003" } });
+      expect(claim.statusCode).toBe(403);
+      expect(edit.statusCode).toBe(403);
+      expect(mocks.claimDevice).not.toHaveBeenCalled();
+      expect(mocks.updateDevice).not.toHaveBeenCalled();
+    });
   });
 
   it("shows the sheet only to owner/admin, with the SIM only when they see the whole fleet", async () => {
@@ -136,6 +176,27 @@ describe("/devices routes", () => {
     expect(mocks.claimDevice).toHaveBeenLastCalledWith("org-1", "860848088107876", "FMC003");
     await app.inject({ method: "POST", url: "/devices/claim", headers: as("owner"), payload: { imei: "860848088107876" } });
     expect(mocks.claimDevice).toHaveBeenLastCalledWith("org-1", "860848088107876", undefined);
+  });
+
+  it("lets OneSystec claim a device straight into a client's organization", async () => {
+    mocks.claimDevice.mockResolvedValue({ id: DEVICE_ID });
+    const client = "323e4567-e89b-12d3-a456-426614174000";
+    const ok = await app.inject({ method: "POST", url: "/devices/claim", headers: as("admin"), payload: { imei: "860848088107876", model: "FMC003", orgId: client } });
+    expect(ok.statusCode).toBe(200);
+    expect(mocks.claimDevice).toHaveBeenLastCalledWith(client, "860848088107876", "FMC003");
+    const bad = await app.inject({ method: "POST", url: "/devices/claim", headers: as("admin"), payload: { imei: "860848088107876", orgId: "nope" } });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it("answers 404 when the target organization doesn't exist, and never lets a client choose one", async () => {
+    mocks.claimDevice.mockRejectedValue(Object.assign(new Error("fk"), { code: "23503" }));
+    const missing = await app.inject({ method: "POST", url: "/devices/claim", headers: as("admin"), payload: { imei: "860848088107876", orgId: "323e4567-e89b-12d3-a456-426614174000" } });
+    expect(missing.statusCode).toBe(404);
+    mocks.claimDevice.mockClear();
+    who.platform = false;
+    const client = await app.inject({ method: "POST", url: "/devices/claim", headers: as("owner"), payload: { imei: "860848088107876", orgId: "323e4567-e89b-12d3-a456-426614174000" } });
+    expect(client.statusCode).toBe(403);
+    expect(mocks.claimDevice).not.toHaveBeenCalled();
   });
 
   it("rejects a 15-digit IMEI with a wrong check digit before touching the service", async () => {

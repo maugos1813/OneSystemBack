@@ -8,11 +8,14 @@ import {
   requestGreenDriving,
   requestImmobilizer,
 } from "../../services/deviceCommand.service.js";
-import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
+import { redactDevice } from "../../services/deviceRedaction.js";
+import { isPlatformUser } from "../../services/platform.service.js";
+import { requireAuth, requirePlatform, requireRole } from "../middlewares/auth.middleware.js";
 
 const model = z.string().trim().min(1).max(50);
 
-const claimSchema = z.object({ imei: z.string().min(10).max(20), model: model.optional() });
+// `orgId`: OneSystec (the only one who gets here) says which client the device goes to; without it, its own organization.
+const claimSchema = z.object({ imei: z.string().min(10).max(20), model: model.optional(), orgId: z.string().uuid().optional() });
 
 /** "" clears the field. */
 const optionalLabel = (max: number) =>
@@ -53,17 +56,20 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
       },
     },
     async (request) => {
-      return listDevicesForOrg(request.user.orgId, request.user.allowedArea);
+      const list = await listDevicesForOrg(request.user.orgId, request.user.allowedArea);
+      // The IMEI, serial and firmware are OneSystec's; a client sees its devices by vehicle and model.
+      return (await isPlatformUser(request.user.userId)) ? list : list.map(redactDevice);
     },
   );
 
   app.post(
     "/devices/claim",
     {
-      preHandler: requireRole("owner", "admin"),
+      // Adding hardware by IMEI is OneSystec's job: a client never types an IMEI.
+      preHandler: [requireRole("owner", "admin"), requirePlatform],
       schema: {
         tags: ["Devices"],
-        summary: "Vincular un dispositivo sin reclamar (por IMEI) a tu organización",
+        summary: "Vincular un dispositivo sin reclamar (por IMEI) a una organización (solo OneSystec)",
         security: AUTH,
         body: zodToJsonSchema(claimSchema),
       },
@@ -74,12 +80,21 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: parsed.error.flatten() });
       }
 
-      const { imei, model } = parsed.data;
+      const { imei, model, orgId } = parsed.data;
       if (/^\d{15}$/.test(imei) && !isValidImei(imei)) {
         return reply.code(400).send({ error: "IMEI inválido: revisa los 15 dígitos" });
       }
 
-      const device = await claimDevice(request.user.orgId, imei, model);
+      let device;
+      try {
+        device = await claimDevice(orgId ?? request.user.orgId, imei, model);
+      } catch (err) {
+        // foreign_key_violation: the organization it was meant for doesn't exist.
+        if (typeof err === "object" && err !== null && "code" in err && err.code === "23503") {
+          return reply.code(404).send({ error: "Organization not found" });
+        }
+        throw err;
+      }
       if (!device) {
         return reply.code(404).send({ error: "Device not found or already claimed" });
       }
@@ -103,23 +118,25 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
       const params = idParams.safeParse(request.params);
       if (!params.success) return reply.code(400).send({ error: "Invalid device id" });
 
-      const { orgId, role, allowedArea } = request.user;
+      const { orgId, role, allowedArea, userId } = request.user;
+      const platform = await isPlatformUser(userId);
       const detail = await getDeviceDetail(orgId, params.data.id, {
         allowedArea,
-        includeSim: (role === "owner" || role === "admin") && !allowedArea,
+        // The SIM (number, ICCID) and the hardware identity are OneSystec's, not the client's.
+        includeSim: platform && (role === "owner" || role === "admin") && !allowedArea,
       });
       if (!detail) return reply.code(404).send({ error: "Device not found" });
-      return detail;
+      return platform ? detail : { ...detail, device: redactDevice(detail.device) };
     },
   );
 
   app.patch(
     "/devices/:id",
     {
-      preHandler: requireRole("owner", "admin"),
+      preHandler: [requireRole("owner", "admin"), requirePlatform],
       schema: {
         tags: ["Devices"],
-        summary: "Editar el modelo, número de serie y firmware de un dispositivo",
+        summary: "Editar el modelo, número de serie y firmware de un dispositivo (solo OneSystec)",
         security: AUTH,
         params: zodToJsonSchema(idParams),
         body: zodToJsonSchema(patchSchema),
