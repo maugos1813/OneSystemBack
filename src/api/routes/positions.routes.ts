@@ -60,8 +60,8 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
   app.get(
     "/vehicles/:id/positions",
     {
-      // The history behind Historial and Analíticas (speed trend); the live map only needs /latest.
-      preHandler: requireModule("historial", "analiticas"),
+      // The history behind Historial; the live map only needs /latest.
+      preHandler: requireModule("historial"),
       schema: {
         tags: ["Positions"],
         summary: "Histórico de posiciones de un vehículo, por rango de fechas",

@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../src/services/userModules.service.js", () => ({
   // As the real one: owner and admin have everything their organization has.
-  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","analiticas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : state.granted),
+  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : state.granted),
 }));
 vi.mock("../../src/services/teamUser.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/teamUser.service.js")>()),
@@ -59,8 +59,11 @@ describe("sections enforced by the server", () => {
     expect((await app.inject({ method: "GET", url: "/tolls/months", headers: as("viewer") })).statusCode).not.toBe(403);
     state.granted = ["cockpit"];
     expect((await app.inject({ method: "GET", url: "/driving-style", headers: as("viewer") })).statusCode).not.toBe(403);
-    state.granted = ["analiticas"];
+    state.granted = ["historial"];
     expect((await app.inject({ method: "GET", url: `/vehicles/${VEHICLE}/positions`, headers: as("viewer") })).statusCode).not.toBe(403);
+    // Analíticas no longer exists: it opens nothing.
+    state.granted = ["analiticas"];
+    expect((await app.inject({ method: "GET", url: `/vehicles/${VEHICLE}/positions`, headers: as("viewer") })).statusCode).toBe(403);
   });
 
   it("never gates owner or admin", async () => {

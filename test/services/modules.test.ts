@@ -69,6 +69,13 @@ describe("the module catalog", () => {
     expect(resolveModules("viewer", [])).toEqual([]);
   });
 
+  it("ignores a section that no longer exists (Analíticas) wherever it was stored", () => {
+    expect(sanitizeModules(["analiticas", "mapa"])).toEqual(["mapa"]);
+    expect(resolveModules("viewer", ["mapa", "analiticas"])).toEqual(["mapa"]);
+    expect(MODULE_KEYS).not.toContain("analiticas");
+    for (const template of Object.values(MODULE_TEMPLATES)) expect(template).not.toContain("analiticas");
+  });
+
   it("limits an organization to what OneSystec allowed it: the holder and admins get exactly that, others within it", () => {
     const allowed = ["mapa", "alertas", "vehiculos", "dispositivos"];
     expect(resolveModules("owner", [], allowed)).toEqual(["mapa", "alertas", "vehiculos"]);

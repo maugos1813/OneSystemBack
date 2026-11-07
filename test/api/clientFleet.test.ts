@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../src/services/userModules.service.js", () => ({
   // As the real one: owner and admin have everything their organization has.
-  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","analiticas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : state.granted),
+  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : state.granted),
 }));
 vi.mock("../../src/services/vehicle.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/vehicle.service.js")>()),

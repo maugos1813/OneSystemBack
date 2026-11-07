@@ -15,7 +15,7 @@ vi.mock("../../src/db/client.js", async () => {
 });
 vi.mock("../../src/services/userModules.service.js", () => ({
   // A client account with the sections a client usually has.
-  getUserModules: async () => ["vehiculos", "historial", "analiticas"],
+  getUserModules: async () => ["vehiculos", "historial"],
 }));
 
 const clientModule = (await import("../../src/db/client.js")) as unknown as { __pg: PGlite };

@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ getTagliando: vi.fn(), registerTagliando: vi.f
 const granted = vi.hoisted(() => ({ modules: ["mantenimiento"] as string[] }));
 vi.mock("../../src/services/userModules.service.js", () => ({
   // As the real one: owner and admin have everything their organization has.
-  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","analiticas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : granted.modules),
+  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : granted.modules),
 }));
 vi.mock("../../src/services/tagliando.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/tagliando.service.js")>()),
