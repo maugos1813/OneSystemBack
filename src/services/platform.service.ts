@@ -5,18 +5,26 @@ import { env } from "../config/env.js";
 import { registerOrganizationWithOwner } from "./auth.service.js";
 
 /**
- * The platform is OneSystec itself: the organization(s) listed in PLATFORM_ORG_IDS. Everyone else is a client, and a
- * client never sees across organizations. Fail closed: with the variable unset, nobody is the platform.
+ * The platform is OneSystec: the people whose email is in PLATFORM_ADMIN_EMAILS. An email, not an organization: OneSystec's
+ * own account may well sit inside a client's organization, and then everyone else there must not inherit anything. Fail closed:
+ * with the variable unset, nobody is the platform.
  */
-export function platformOrgIds(raw: string | undefined = env.PLATFORM_ORG_IDS): string[] {
+export function platformEmails(raw: string | undefined = env.PLATFORM_ADMIN_EMAILS): string[] {
   return (raw ?? "")
     .split(",")
-    .map((id) => id.trim().toLowerCase())
+    .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
 }
 
-export function isPlatformOrg(orgId: string | undefined | null, raw?: string): boolean {
-  return !!orgId && platformOrgIds(raw).includes(orgId.toLowerCase());
+export function isPlatformEmail(email: string | undefined | null, raw?: string): boolean {
+  return !!email && platformEmails(raw).includes(email.trim().toLowerCase());
+}
+
+/** Whether this logged-in user is one of the platform's people. Read from the database, not from the token. */
+export async function isPlatformUser(userId: string): Promise<boolean> {
+  if (platformEmails().length === 0) return false;
+  const [row] = await db.select({ email: users.email, role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  return !!row && (row.role === "owner" || row.role === "admin") && isPlatformEmail(row.email);
 }
 
 export interface OrganizationSummary {
@@ -29,7 +37,6 @@ export interface OrganizationSummary {
   devices: number;
   /** The most recent time any of its devices reported. */
   lastDeviceSeenAt: Date | null;
-  isPlatform: boolean;
 }
 
 /** Every organization with what it has, for the platform administration. Counts are done in SQL, one pass. */
@@ -61,7 +68,6 @@ export async function listOrganizations(): Promise<OrganizationSummary[]> {
     vehicles: Number(row.vehicles),
     devices: Number(row.devices),
     lastDeviceSeenAt: row.last_seen ? new Date(row.last_seen) : null,
-    isPlatform: isPlatformOrg(row.id),
   }));
 }
 

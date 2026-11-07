@@ -3,7 +3,7 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { logoSchema } from "../../services/orgLogo.js";
 import { authenticate, getCurrentUser, registerOrganizationWithOwner } from "../../services/auth.service.js";
-import { isPlatformOrg } from "../../services/platform.service.js";
+import { isPlatformUser } from "../../services/platform.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { rateLimitLogin, rateLimitRegister } from "../middlewares/loginRateLimit.js";
 
@@ -98,7 +98,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const me = await getCurrentUser(request.user.userId);
       if (!me) return reply.code(404).send({ error: "User not found" });
-      return { ...me, isPlatform: isPlatformOrg(me.orgId) && (me.role === "owner" || me.role === "admin") };
+      return { ...me, isPlatform: await isPlatformUser(me.userId) };
     },
   );
 }
