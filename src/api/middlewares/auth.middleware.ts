@@ -91,14 +91,13 @@ export function requireRole(...roles: Array<"owner" | "admin" | "manager" | "vie
 }
 
 /**
- * Lets the request through only if the user has at least one of these OneTrack sections. Owner and admin always
- * do, and API keys are governed by their own rules (they never reach these routes except the legacy reads).
- * Checked against the database on every request: an admin taking a section away takes effect immediately.
+ * Lets the request through only if the user has at least one of these OneTrack sections. Owner and admin have all of what
+ * their organization has (OneSystec may limit it), and API keys are governed by their own rules (they never reach these routes
+ * except the legacy reads). Checked against the database on every request: a change by an admin, or by OneSystec, applies at once.
  */
 export function requireModule(...modules: ModuleKey[]) {
   return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
     if (request.apiKeyId) return;
-    if (request.user.role === "owner" || request.user.role === "admin") return;
     const granted = await getUserModules(request.user.userId);
     if (!modules.some((module) => granted.includes(module))) {
       await reply.code(403).send({ error: "Esta sección no está habilitada para tu cuenta" });

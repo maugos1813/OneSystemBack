@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   updateTeamMemberModules: vi.fn(),
 }));
 
-vi.mock("../../src/services/userModules.service.js", () => ({ getUserModules: async () => state.granted }));
+vi.mock("../../src/services/userModules.service.js", () => ({
+  // As the real one: owner and admin have everything their organization has.
+  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","analiticas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : state.granted),
+}));
 vi.mock("../../src/services/teamUser.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/teamUser.service.js")>()),
   ...mocks,
@@ -31,7 +34,7 @@ describe("sections enforced by the server", () => {
     state.granted = ["mapa"];
   });
 
-  const as = (role: string, userId = "u1") => ({
+  const as = (role: string, userId = `u1-${role}`) => ({
     authorization: `Bearer ${app.jwt.sign({ userId, orgId: "org-1", role, allowedArea: null } as never)}`,
   });
 
@@ -99,7 +102,7 @@ describe("sections enforced by the server", () => {
     mocks.getTeamMember.mockResolvedValue({ id: MEMBER, role: "viewer", parentUserId: "someone-else" });
     expect((await app.inject({ method: "PATCH", url, headers: as("manager"), payload: { modules: ["mapa"] } })).statusCode).toBe(403);
 
-    mocks.getTeamMember.mockResolvedValue({ id: MEMBER, role: "viewer", parentUserId: "u1" });
+    mocks.getTeamMember.mockResolvedValue({ id: MEMBER, role: "viewer", parentUserId: "u1-manager" });
     expect((await app.inject({ method: "PATCH", url, headers: as("manager"), payload: { modules: ["mapa", "peajes"] } })).statusCode).toBe(400);
     expect((await app.inject({ method: "PATCH", url, headers: as("manager"), payload: { modules: ["mapa"] } })).statusCode).toBe(200);
   });

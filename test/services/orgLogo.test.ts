@@ -27,7 +27,7 @@ beforeAll(async () => {
     CREATE TYPE user_role AS ENUM ('owner', 'admin', 'manager', 'viewer');
     CREATE TABLE organizations (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(200) NOT NULL, logo text,
-      plan varchar(50) NOT NULL DEFAULT 'free', settings jsonb NOT NULL DEFAULT '{}',
+      plan varchar(50) NOT NULL DEFAULT 'free', settings jsonb NOT NULL DEFAULT '{}', modules text[],
       created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE users (

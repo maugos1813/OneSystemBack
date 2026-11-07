@@ -10,6 +10,9 @@ export const organizations = pgTable("organizations", {
    * defaults. Stored as a partial object; missing fields fall back to defaults on read,
    * so the shape can grow without a migration for every new preference. */
   settings: jsonb("settings").notNull().default({}),
+  /** The sections of OneTrack this client may have at all, set by OneSystec (see modules.ts). Null: no limit, everything. A client's
+   * account holder and admins get exactly these; its other users get what they were given, within them. */
+  modules: text("modules").array(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

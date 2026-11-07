@@ -163,6 +163,7 @@ async function getAlertRecipients(orgId: string): Promise<AlertRecipient[]> {
   const recipients: AlertRecipient[] = [];
   const owner = await getOwner(orgId);
   if (owner) recipients.push({ userId: owner.id, email: owner.email, language: toLanguage(owner.language), fleetGroup: null });
+  const [org] = await db.select({ modules: organizations.modules }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
   const clients = await db
     .select({ id: users.id, email: users.email, role: users.role, allowedArea: users.allowedArea, modules: users.modules, language: users.language })
     .from(users)
@@ -170,7 +171,7 @@ async function getAlertRecipients(orgId: string): Promise<AlertRecipient[]> {
   for (const client of clients) {
     if (client.role !== "viewer" && client.role !== "manager") continue;
     if (!client.allowedArea || client.id === owner?.id) continue;
-    if (!resolveModules(client.role, client.modules).includes("alertas")) continue;
+    if (!resolveModules(client.role, client.modules, org?.modules ?? null).includes("alertas")) continue;
     recipients.push({ userId: client.id, email: client.email, language: toLanguage(client.language), fleetGroup: client.allowedArea });
   }
   return recipients;

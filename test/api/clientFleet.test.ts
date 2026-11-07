@@ -12,7 +12,10 @@ const mocks = vi.hoisted(() => ({
   createDocument: vi.fn(),
 }));
 
-vi.mock("../../src/services/userModules.service.js", () => ({ getUserModules: async () => state.granted }));
+vi.mock("../../src/services/userModules.service.js", () => ({
+  // As the real one: owner and admin have everything their organization has.
+  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","analiticas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : state.granted),
+}));
 vi.mock("../../src/services/vehicle.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/vehicle.service.js")>()),
   createVehicle: mocks.createVehicle,
@@ -49,7 +52,7 @@ describe("a client's own fleet", () => {
   });
 
   const as = (role: string, allowedArea: string | null = "PIAZZA") => ({
-    authorization: `Bearer ${app.jwt.sign({ userId: "u1", orgId: "org-1", role, allowedArea } as never)}`,
+    authorization: `Bearer ${app.jwt.sign({ userId: `u1-${role}`, orgId: "org-1", role, allowedArea } as never)}`,
   });
 
   describe("vehicles", () => {

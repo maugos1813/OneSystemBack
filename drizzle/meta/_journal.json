@@ -253,6 +253,13 @@
       "when": 1794053511755,
       "tag": "0035_lush_dracula",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794060252472,
+      "tag": "0036_spicy_nebula",
+      "breakpoints": true
     }
   ]
 }

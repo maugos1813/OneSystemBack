@@ -11,7 +11,8 @@ vi.mock("../../src/db/client.js", async () => {
 });
 
 const clientModule = (await import("../../src/db/client.js")) as unknown as { db: ReturnType<typeof drizzle>; __pg: PGlite };
-const { MODULE_KEYS, MODULE_TEMPLATES, DEFAULT_MODULES, resolveModules, sanitizeModules } = await import("../../src/services/modules.js");
+const modulesModule = await import("../../src/services/modules.js");
+const { MODULE_KEYS, MODULE_TEMPLATES, DEFAULT_MODULES, resolveModules, sanitizeModules } = modulesModule;
 const { registerOrganizationWithOwner, getCurrentUser } = await import("../../src/services/auth.service.js");
 const { createTeamMember, updateTeamMemberModules, updateTeamMemberLanguage, listTeamMembers } = await import("../../src/services/teamUser.service.js");
 const { toLanguage } = await import("../../src/services/i18n.js");
@@ -23,7 +24,7 @@ beforeAll(async () => {
     CREATE TYPE user_role AS ENUM ('owner', 'admin', 'manager', 'viewer');
     CREATE TABLE organizations (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(200) NOT NULL, logo text,
-      plan varchar(50) NOT NULL DEFAULT 'free', settings jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT now()
+      plan varchar(50) NOT NULL DEFAULT 'free', settings jsonb NOT NULL DEFAULT '{}', modules text[], created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE users (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL DEFAULT '',
@@ -66,6 +67,26 @@ describe("the module catalog", () => {
     expect(resolveModules("viewer", ["mapa", "peajes"])).toEqual(["mapa", "peajes"]);
     expect(resolveModules("manager", null)).toEqual([...DEFAULT_MODULES]);
     expect(resolveModules("viewer", [])).toEqual([]);
+  });
+
+  it("limits an organization to what OneSystec allowed it: the holder and admins get exactly that, others within it", () => {
+    const allowed = ["mapa", "alertas", "vehiculos", "dispositivos"];
+    expect(resolveModules("owner", [], allowed)).toEqual(["mapa", "alertas", "vehiculos"]);
+    expect(resolveModules("admin", ["conduccion"], allowed)).toEqual(["mapa", "alertas", "vehiculos"]);
+    expect(resolveModules("viewer", ["mapa", "conduccion", "vencimientos"], allowed)).toEqual(["mapa"]);
+    expect(resolveModules("manager", null, ["mapa"])).toEqual(["mapa"]);
+    expect(resolveModules("owner", [], [])).toEqual([]);
+    expect(resolveModules("owner", [], null)).toEqual([...MODULE_KEYS]);
+  });
+
+  it("gives the administration pages only to owner/admin, within what the organization has", () => {
+    const { resolveAdminSections, sanitizeOrgSections } = modulesModule;
+    expect(resolveAdminSections("owner", null)).toEqual(["dispositivos", "ajustes", "api_keys"]);
+    expect(resolveAdminSections("admin", ["mapa", "ajustes"])).toEqual(["ajustes"]);
+    expect(resolveAdminSections("viewer", null)).toEqual([]);
+    expect(resolveAdminSections("manager", ["dispositivos"])).toEqual([]);
+    expect(sanitizeOrgSections(null)).toBeNull();
+    expect(sanitizeOrgSections(["ajustes", "nada", "mapa", "mapa"])).toEqual(["mapa", "ajustes"]);
   });
 
   it("drops unknown keys and repeats", () => {

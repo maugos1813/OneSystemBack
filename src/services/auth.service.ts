@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizations, users, type User } from "../db/schema/index.js";
 import { toLanguage, type Language } from "./i18n.js";
-import { resolveModules, type ModuleKey } from "./modules.js";
+import { resolveAdminSections, resolveModules, type AdminSectionKey, type ModuleKey } from "./modules.js";
 
 export interface CurrentUser {
   userId: string;
@@ -19,6 +19,8 @@ export interface CurrentUser {
   userLogo: string | null;
   /** The OneTrack sections this user may use (everything for owner/admin). */
   modules: ModuleKey[];
+  /** The administration pages of its own account that this user has (only owner/admin have any). */
+  adminSections: AdminSectionKey[];
   /** The language the app, the alerts and the emails are shown to this user in. */
   language: Language;
 }
@@ -36,6 +38,7 @@ export async function getCurrentUser(userId: string): Promise<CurrentUser | unde
       orgLogo: organizations.logo,
       userLogo: users.logo,
       storedModules: users.modules,
+      orgModules: organizations.modules,
       storedLanguage: users.language,
     })
     .from(users)
@@ -43,8 +46,13 @@ export async function getCurrentUser(userId: string): Promise<CurrentUser | unde
     .where(eq(users.id, userId))
     .limit(1);
   if (!row) return undefined;
-  const { storedModules, storedLanguage, ...rest } = row;
-  return { ...rest, modules: resolveModules(row.role, storedModules), language: toLanguage(storedLanguage) };
+  const { storedModules, orgModules, storedLanguage, ...rest } = row;
+  return {
+    ...rest,
+    modules: resolveModules(row.role, storedModules, orgModules),
+    adminSections: resolveAdminSections(row.role, orgModules),
+    language: toLanguage(storedLanguage),
+  };
 }
 
 export async function hashPassword(password: string): Promise<string> {

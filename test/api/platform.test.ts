@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getOrganizationBrief: vi.fn(),
   getPlatformFleet: vi.fn(),
   setUserLogo: vi.fn(),
+  setOrganizationSections: vi.fn(),
 }));
 vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
@@ -163,6 +164,28 @@ describe("cross-client administration is for one account alone", () => {
       expect((await app.inject({ method: "PATCH", url: "/platform/users/nope/logo", headers, payload: { logo: null } })).statusCode).toBe(400);
       mocks.setUserLogo.mockResolvedValue(undefined);
       expect((await app.inject({ method: "PATCH", url: `/platform/users/${USER}/logo`, headers, payload: { logo: null } })).statusCode).toBe(404);
+    });
+  });
+
+  describe("what a client may have", () => {
+    it("is decided by OneSystec alone", async () => {
+      mocks.setOrganizationSections.mockResolvedValue({ sections: ["mapa"] });
+      const url = `/platform/organizations/${CLIENT_ORG}/sections`;
+      expect((await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "owner", "u1"), payload: { sections: ["mapa"] } })).statusCode).toBe(403);
+      expect(mocks.setOrganizationSections).not.toHaveBeenCalled();
+      const ok = await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "admin", "platform-user"), payload: { sections: ["mapa"] } });
+      expect(ok.statusCode).toBe(200);
+      expect(mocks.setOrganizationSections).toHaveBeenCalledWith(CLIENT_ORG, ["mapa"]);
+      await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "admin", "platform-user"), payload: { sections: null } });
+      expect(mocks.setOrganizationSections).toHaveBeenLastCalledWith(CLIENT_ORG, null);
+    });
+
+    it("rejects a malformed body or id, and answers 404 for an unknown client", async () => {
+      const headers = as(SAME_ORG, "admin", "platform-user");
+      expect((await app.inject({ method: "PATCH", url: `/platform/organizations/${CLIENT_ORG}/sections`, headers, payload: { sections: "mapa" } })).statusCode).toBe(400);
+      expect((await app.inject({ method: "PATCH", url: "/platform/organizations/nope/sections", headers, payload: { sections: null } })).statusCode).toBe(400);
+      mocks.setOrganizationSections.mockResolvedValue(undefined);
+      expect((await app.inject({ method: "PATCH", url: `/platform/organizations/${CLIENT_ORG}/sections`, headers, payload: { sections: [] } })).statusCode).toBe(404);
     });
   });
 });

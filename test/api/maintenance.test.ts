@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const granted = vi.hoisted(() => ({ modules: ["mantenimiento"] as string[] }));
-vi.mock("../../src/services/userModules.service.js", () => ({ getUserModules: async () => granted.modules }));
+vi.mock("../../src/services/userModules.service.js", () => ({
+  // As the real one: owner and admin have everything their organization has.
+  getUserModules: async (userId: string) => (userId.endsWith("-owner") || userId.endsWith("-admin") ? ["mapa","historial","alertas","analiticas","vehiculos","geocercas","mantenimiento","cockpit","conduccion","peajes","vencimientos"] : granted.modules),
+}));
 
 vi.mock("../../src/services/maintenance.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/maintenance.service.js")>()),
@@ -34,7 +37,7 @@ describe("/maintenance routes", () => {
   });
 
   const as = (role: string, allowedArea: string | null = null) => ({
-    authorization: `Bearer ${app.jwt.sign({ userId: "u1", orgId: "org-1", role, allowedArea } as never)}`,
+    authorization: `Bearer ${app.jwt.sign({ userId: `u1-${role}`, orgId: "org-1", role, allowedArea } as never)}`,
   });
 
   beforeEach(() => {
