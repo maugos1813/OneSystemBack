@@ -77,6 +77,21 @@ async function requireOrgWideAdmin(request: FastifyRequest, reply: FastifyReply)
   if (request.user.allowedArea) await reply.code(403).send({ error: "SIMs are managed by organization-wide accounts" });
 }
 
+/**
+ * Whose SIMs: a client's, picked by OneSystec with `?orgId=` (these routes are OneSystec's alone), or its own organization's
+ * when nothing is picked. Undefined means the id isn't a valid one and the request was already answered.
+ */
+async function targetOrg(request: FastifyRequest, reply: FastifyReply): Promise<string | undefined> {
+  const raw = (request.query as { orgId?: string } | undefined)?.orgId;
+  if (raw === undefined || raw === "") return request.user.orgId;
+  const parsed = z.string().uuid().safeParse(raw);
+  if (!parsed.success) {
+    await reply.code(400).send({ error: "Invalid orgId" });
+    return undefined;
+  }
+  return parsed.data;
+}
+
 function sendSimError(reply: FastifyReply, err: unknown) {
   if (err instanceof SimError) return reply.code(err.status).send({ error: err.message });
   throw err;
@@ -95,7 +110,11 @@ export async function simsRoutes(app: FastifyInstance): Promise<void> {
       preHandler: guard,
       schema: { tags: ["SIMs"], summary: "Listar las SIMs (sin PIN/PUK) (owner/admin)", security: AUTH },
     },
-    async (request) => listSims(request.user.orgId),
+    async (request, reply) => {
+      const orgId = await targetOrg(request, reply);
+      if (!orgId) return reply;
+      return listSims(orgId);
+    },
   );
 
   app.post(
@@ -105,11 +124,17 @@ export async function simsRoutes(app: FastifyInstance): Promise<void> {
       schema: { tags: ["SIMs"], summary: "Registrar una SIM (owner/admin)", security: AUTH },
     },
     async (request, reply) => {
+      const orgId = await targetOrg(request, reply);
+      if (!orgId) return reply;
       const parsed = createSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
       try {
-        return reply.code(201).send(await createSim(request.user.orgId, parsed.data));
+        return reply.code(201).send(await createSim(orgId, parsed.data));
       } catch (err) {
+        // foreign_key_violation: the organization it was meant for doesn't exist.
+        if (typeof err === "object" && err !== null && "code" in err && err.code === "23503") {
+          return reply.code(404).send({ error: "Organization not found" });
+        }
         return sendSimError(reply, err);
       }
     },
@@ -123,10 +148,12 @@ export async function simsRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
+      const orgId = await targetOrg(request, reply);
+      if (!orgId) return reply;
       const parsed = updateSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
       try {
-        return await updateSim(request.user.orgId, id, parsed.data);
+        return await updateSim(orgId, id, parsed.data);
       } catch (err) {
         return sendSimError(reply, err);
       }
@@ -141,7 +168,9 @@ export async function simsRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      if (!(await deleteSim(request.user.orgId, id))) return reply.code(404).send({ error: "SIM not found" });
+      const orgId = await targetOrg(request, reply);
+      if (!orgId) return reply;
+      if (!(await deleteSim(orgId, id))) return reply.code(404).send({ error: "SIM not found" });
       return reply.code(204).send();
     },
   );
@@ -154,7 +183,9 @@ export async function simsRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const secrets = await getSimSecrets(request.user.orgId, id);
+      const orgId = await targetOrg(request, reply);
+      if (!orgId) return reply;
+      const secrets = await getSimSecrets(orgId, id);
       if (!secrets) return reply.code(404).send({ error: "SIM not found" });
       // Never cacheable: these are credentials.
       void reply.header("Cache-Control", "no-store");

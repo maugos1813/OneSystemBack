@@ -133,6 +133,48 @@ describe("/sims routes", () => {
     expect(mocks.createSim).not.toHaveBeenCalled();
   });
 
+  it("lets OneSystec work on a client's SIMs with ?orgId=, and on its own without it", async () => {
+    const client = "323e4567-e89b-12d3-a456-426614174000";
+    mocks.createSim.mockResolvedValue({ id: SIM_ID });
+    mocks.updateSim.mockResolvedValue({ id: SIM_ID });
+    mocks.deleteSim.mockResolvedValue(true);
+    mocks.getSimSecrets.mockResolvedValue({ pin: "1234", puk: null });
+
+    await app.inject({ method: "GET", url: `/sims?orgId=${client}`, headers: as("admin") });
+    expect(mocks.listSims).toHaveBeenLastCalledWith(client);
+    await app.inject({ method: "GET", url: "/sims", headers: as("admin") });
+    expect(mocks.listSims).toHaveBeenLastCalledWith("org-1");
+
+    const iccid = "8939010002782221067";
+    await app.inject({ method: "POST", url: `/sims?orgId=${client}`, headers: as("admin"), payload: { iccid } });
+    expect(mocks.createSim.mock.calls.at(-1)?.[0]).toBe(client);
+    await app.inject({ method: "PATCH", url: `/sims/${SIM_ID}?orgId=${client}`, headers: as("admin"), payload: { operator: "TIM" } });
+    expect(mocks.updateSim.mock.calls.at(-1)?.[0]).toBe(client);
+    await app.inject({ method: "GET", url: `/sims/${SIM_ID}/secrets?orgId=${client}`, headers: as("admin") });
+    expect(mocks.getSimSecrets).toHaveBeenLastCalledWith(client, SIM_ID);
+    await app.inject({ method: "DELETE", url: `/sims/${SIM_ID}?orgId=${client}`, headers: as("admin") });
+    expect(mocks.deleteSim).toHaveBeenLastCalledWith(client, SIM_ID);
+  });
+
+  it("rejects a malformed orgId, answers 404 for an unknown organization, and never lets a client pick one", async () => {
+    expect((await app.inject({ method: "GET", url: "/sims?orgId=nope", headers: as("admin") })).statusCode).toBe(400);
+    expect(mocks.listSims).not.toHaveBeenCalled();
+
+    mocks.createSim.mockRejectedValue(Object.assign(new Error("fk"), { code: "23503" }));
+    const missing = await app.inject({
+      method: "POST",
+      url: "/sims?orgId=323e4567-e89b-12d3-a456-426614174000",
+      headers: as("admin"),
+      payload: { iccid: "8939010002782221067" },
+    });
+    expect(missing.statusCode).toBe(404);
+
+    who.platform = false;
+    const forbidden = await app.inject({ method: "GET", url: "/sims?orgId=323e4567-e89b-12d3-a456-426614174000", headers: as("owner") });
+    expect(forbidden.statusCode).toBe(403);
+    expect(mocks.listSims).not.toHaveBeenCalled();
+  });
+
   it("is for owner and admin only", async () => {
     for (const role of ["viewer", "manager"]) {
       expect((await app.inject({ method: "GET", url: "/sims", headers: as(role) })).statusCode, role).toBe(403);

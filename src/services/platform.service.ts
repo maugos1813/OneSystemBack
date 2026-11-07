@@ -1,6 +1,6 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { devices, organizations, users } from "../db/schema/index.js";
+import { devices, organizations, users, vehicles } from "../db/schema/index.js";
 import { env } from "../config/env.js";
 import { registerOrganizationWithOwner } from "./auth.service.js";
 
@@ -73,7 +73,14 @@ export async function listOrganizations(): Promise<OrganizationSummary[]> {
 
 export interface OrganizationDetail extends OrganizationSummary {
   members: Array<{ id: string; name: string; email: string; role: string; allowedArea: string | null }>;
-  deviceList: Array<{ id: string; imei: string; model: string; status: string; lastSeenAt: Date | null }>;
+  deviceList: Array<{
+    id: string;
+    imei: string;
+    model: string;
+    status: string;
+    lastSeenAt: Date | null;
+    vehicle: { name: string; plate: string | null } | null;
+  }>;
 }
 
 export async function getOrganizationDetail(id: string): Promise<OrganizationDetail | undefined> {
@@ -86,11 +93,24 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
     .from(users)
     .where(eq(users.orgId, id))
     .orderBy(asc(users.createdAt));
-  const deviceList = await db
-    .select({ id: devices.id, imei: devices.imei, model: devices.model, status: devices.status, lastSeenAt: devices.lastSeenAt })
+  const rows = await db
+    .select({
+      id: devices.id,
+      imei: devices.imei,
+      model: devices.model,
+      status: devices.status,
+      lastSeenAt: devices.lastSeenAt,
+      vehicleName: vehicles.name,
+      vehiclePlate: vehicles.plate,
+    })
     .from(devices)
+    .leftJoin(vehicles, eq(vehicles.deviceId, devices.id))
     .where(eq(devices.orgId, id))
     .orderBy(asc(devices.createdAt));
+  const deviceList = rows.map(({ vehicleName, vehiclePlate, ...device }) => ({
+    ...device,
+    vehicle: vehicleName ? { name: vehicleName, plate: vehiclePlate } : null,
+  }));
   return { ...summary, members, deviceList };
 }
 
