@@ -42,8 +42,9 @@ async function main() {
       await touchLastSeen(device.id);
       await storeAvlRecords(device.id, packet.records);
 
-      if (device.orgId && packet.records.length > 0) {
+      if (packet.records.length > 0) {
         const latest = await getLatestPosition(device.id);
+        // A device nobody has claimed yet has no org: only OneSystec's all-clients map hears it.
         if (latest) publishPosition(device.orgId, device.id, latest);
       }
     },

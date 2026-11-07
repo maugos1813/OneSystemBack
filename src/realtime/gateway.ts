@@ -5,6 +5,7 @@ import { EventEmitter } from "node:events";
 import { db } from "../db/client.js";
 import type { Position } from "../db/schema/index.js";
 import { vehicles } from "../db/schema/index.js";
+import { isPlatformUser } from "../services/platform.service.js";
 
 /**
  * Simple in-process pub/sub keyed by orgId. Good enough for a single API instance;
@@ -13,8 +14,13 @@ import { vehicles } from "../db/schema/index.js";
 const positionEvents = new EventEmitter();
 positionEvents.setMaxListeners(0);
 
-export function publishPosition(orgId: string, deviceId: string, position: Position): void {
-  positionEvents.emit(orgId, { deviceId, position });
+/** The channel OneSystec listens on to see every device of every client (and the ones no client has claimed yet). */
+const ALL_CLIENTS = "*";
+
+/** `orgId` is null for a device nobody has claimed yet: only OneSystec's all-clients map hears it. */
+export function publishPosition(orgId: string | null, deviceId: string, position: Position): void {
+  if (orgId) positionEvents.emit(orgId, { deviceId, position });
+  positionEvents.emit(ALL_CLIENTS, { deviceId, position });
 }
 
 // Send a ping frequently enough that Railway's edge proxy (and any other intermediary)
@@ -25,21 +31,41 @@ const HEARTBEAT_INTERVAL_MS = 25_000;
 export async function registerRealtimeGateway(app: FastifyInstance): Promise<void> {
   await app.register(websocketPlugin);
 
-  app.get("/realtime/positions", { websocket: true }, (socket, request) => {
+  app.get("/realtime/positions", { websocket: true }, async (socket, request) => {
     // A browser's WebSocket constructor can't set an Authorization header on the
     // handshake, so the JWT travels as a query param here instead — same token the
     // frontend already holds from login, just verified manually rather than via the
     // requireAuth middleware the REST routes use.
-    const { token } = request.query as { token?: string };
+    const { token, scope } = request.query as { token?: string; scope?: string };
     let orgId: string;
     let allowedArea: string | null | undefined;
+    let userId: string;
+    let viewOnly = false;
     try {
       if (!token) throw new Error("missing token");
-      const payload = app.jwt.verify<{ orgId: string; allowedArea?: string | null }>(token);
+      const payload = app.jwt.verify<{ userId: string; orgId: string; allowedArea?: string | null; viewAs?: boolean }>(token);
       orgId = payload.orgId;
       allowedArea = payload.allowedArea;
+      userId = payload.userId;
+      viewOnly = payload.viewAs === true;
     } catch {
       socket.close(4001, "Unauthorized");
+      return;
+    }
+
+    // OneSystec's own map: every device of every client. Only its people, and never through a "viewing a client" token.
+    if (scope === "all") {
+      if (viewOnly || !(await isPlatformUser(userId))) {
+        socket.close(4003, "Forbidden");
+        return;
+      }
+      const onAny = (event: { deviceId: string; position: Position }) => socket.send(JSON.stringify({ type: "position", ...event }));
+      positionEvents.on(ALL_CLIENTS, onAny);
+      const heartbeatAll = setInterval(() => socket.send(JSON.stringify({ type: "ping" })), HEARTBEAT_INTERVAL_MS);
+      socket.on("close", () => {
+        positionEvents.off(ALL_CLIENTS, onAny);
+        clearInterval(heartbeatAll);
+      });
       return;
     }
 

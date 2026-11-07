@@ -1,8 +1,9 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { devices, organizations, users, vehicles } from "../db/schema/index.js";
+import { devices, organizations, users, vehicles, type Device, type Position, type Vehicle } from "../db/schema/index.js";
 import { env } from "../config/env.js";
 import { registerOrganizationWithOwner } from "./auth.service.js";
+import { getLatestPosition } from "./position.service.js";
 
 /**
  * The platform is OneSystec: the people whose email is in PLATFORM_ADMIN_EMAILS. An email, not an organization: OneSystec's
@@ -127,4 +128,72 @@ export async function getOrganizationBrief(id: string): Promise<{ id: string; na
     .where(eq(organizations.id, id))
     .limit(1);
   return org;
+}
+
+/** The name a device without a vehicle goes by on OneSystec's map. */
+const NO_CLIENT = "Sin cliente";
+
+export interface PlatformFleet {
+  /** Every vehicle of every client, `fleetGroup` carrying the client's name; plus one stand-in for each device that has no vehicle. */
+  vehicles: Array<Vehicle & { orgName: string }>;
+  devices: Device[];
+  /** The latest position of each vehicle above, keyed by vehicle id. */
+  positions: Record<string, Position>;
+}
+
+/**
+ * Everything OneSystec's own map needs in one answer: it hands every device out, so it must see each one, whether or not the
+ * client has put it on a vehicle, and whether or not a client has claimed it yet.
+ */
+export async function getPlatformFleet(): Promise<PlatformFleet> {
+  const [orgRows, vehicleRows, deviceRows] = await Promise.all([
+    db.select({ id: organizations.id, name: organizations.name }).from(organizations),
+    db.select().from(vehicles),
+    db.select().from(devices),
+  ]);
+  const orgName = new Map(orgRows.map((org) => [org.id, org.name]));
+  const withVehicle = new Set(vehicleRows.map((v) => v.deviceId).filter((id): id is string => !!id));
+
+  const fleet: PlatformFleet["vehicles"] = vehicleRows.map((v) => {
+    const client = orgName.get(v.orgId) ?? NO_CLIENT;
+    return { ...v, fleetGroup: client, orgName: client };
+  });
+  for (const device of deviceRows) {
+    if (withVehicle.has(device.id)) continue;
+    const client = (device.orgId && orgName.get(device.orgId)) || NO_CLIENT;
+    fleet.push({
+      id: device.id, // a stand-in vehicle: the device's own id is unique and never collides with a real vehicle's
+      orgId: device.orgId ?? "",
+      name: `Sin vehículo · ${device.imei}`,
+      plate: null,
+      fleetGroup: client,
+      deviceId: device.id,
+      odometerOffsetKm: 0,
+      brand: null,
+      model: device.model,
+      year: null,
+      vin: null,
+      fuelType: null,
+      color: null,
+      notes: null,
+      odometerMode: "auto",
+      odometerBaseKm: null,
+      odometerBaseAt: null,
+      kmFactor: 1,
+      kmFactorAt: null,
+      odometerBaseDayKm: null,
+      createdAt: device.createdAt,
+      orgName: client,
+    });
+  }
+
+  const positions: Record<string, Position> = {};
+  await Promise.all(
+    fleet.map(async (vehicle) => {
+      if (!vehicle.deviceId) return;
+      const latest = await getLatestPosition(vehicle.deviceId);
+      if (latest) positions[vehicle.id] = latest;
+    }),
+  );
+  return { vehicles: fleet, devices: deviceRows, positions };
 }

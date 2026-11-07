@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { logoSchema } from "../../services/orgLogo.js";
-import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, listOrganizations } from "../../services/platform.service.js";
+import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
@@ -21,6 +21,17 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     "/platform/organizations",
     { ...PLATFORM, schema: { tags: ["Platform"], summary: "Todas las organizaciones (solo OneSystec)", security: AUTH } },
     async () => listOrganizations(),
+  );
+
+  // OneSystec's own map: every device of every client, with its latest position.
+  app.get(
+    "/platform/fleet",
+    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Todos los vehículos y dispositivos de todos los clientes, con su última posición (solo OneSystec)", security: AUTH } },
+    async (request, reply) => {
+      // A read-only look at one client is that client's account, not OneSystec's overview.
+      if (request.user.viewAs) return reply.code(403).send({ error: "Forbidden" });
+      return getPlatformFleet();
+    },
   );
 
   app.get<{ Params: { id: string } }>(

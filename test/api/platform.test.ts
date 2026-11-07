@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   createClientOrganization: vi.fn(),
   getOrganizationDetail: vi.fn(),
   getOrganizationBrief: vi.fn(),
+  getPlatformFleet: vi.fn(),
 }));
 vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
@@ -115,6 +116,24 @@ describe("cross-client administration is for one account alone", () => {
     it("stops working the moment its holder is no longer OneSystec", async () => {
       mocks.isPlatformUser.mockResolvedValueOnce(false);
       expect((await app.inject({ method: "GET", url: "/devices", headers: viewToken() })).statusCode).toBe(403);
+    });
+  });
+
+  describe("the all-clients map", () => {
+    it("gives the fleet of every client to OneSystec only", async () => {
+      mocks.getPlatformFleet.mockResolvedValue({ vehicles: [], devices: [], positions: {} });
+      expect((await app.inject({ method: "GET", url: "/platform/fleet", headers: as(SAME_ORG, "admin", "u1") })).statusCode).toBe(403);
+      expect((await app.inject({ method: "GET", url: "/platform/fleet" })).statusCode).toBe(401);
+      expect(mocks.getPlatformFleet).not.toHaveBeenCalled();
+      const ok = await app.inject({ method: "GET", url: "/platform/fleet", headers: as(SAME_ORG, "admin", "platform-user") });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json()).toEqual({ vehicles: [], devices: [], positions: {} });
+    });
+
+    it("is not available through a view-only token on one client", async () => {
+      const token = app.jwt.sign({ userId: "platform-user", orgId: CLIENT_ORG, role: "admin", allowedArea: null, viewAs: true } as never);
+      const res = await app.inject({ method: "GET", url: "/platform/fleet", headers: { authorization: `Bearer ${token}` } });
+      expect(res.statusCode).toBe(403);
     });
   });
 });
