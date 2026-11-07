@@ -47,15 +47,9 @@ describe("logo in the routes", () => {
   });
   const MEMBER = "123e4567-e89b-12d3-a456-426614174000";
 
-  it("passes the logo to the registration, and rejects a bad one before touching the service", async () => {
-    mocks.registerOrganizationWithOwner.mockResolvedValue({ orgId: "o", user: { id: "u", role: "owner", allowedArea: null } });
-    const ok = await app.inject({ method: "POST", url: "/auth/register", payload: { orgName: "Gamonal", email: "a@b.it", password: "supersecret1", logo: PNG } });
-    expect(ok.statusCode).toBe(201);
-    expect(mocks.registerOrganizationWithOwner).toHaveBeenCalledWith(expect.objectContaining({ logo: PNG }));
-
-    mocks.registerOrganizationWithOwner.mockClear();
-    const bad = await app.inject({ method: "POST", url: "/auth/register", payload: { orgName: "Gamonal", email: "a@b.it", password: "supersecret1", logo: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" } });
-    expect(bad.statusCode).toBe(400);
+  it("is closed to the public: registration answers 403 and never reaches the service", async () => {
+    const res = await app.inject({ method: "POST", url: "/auth/register", payload: { orgName: "Gamonal", email: "a@b.it", password: "supersecret1", logo: PNG } });
+    expect(res.statusCode).toBe(403);
     expect(mocks.registerOrganizationWithOwner).not.toHaveBeenCalled();
   });
 

@@ -1,57 +1,22 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { logoSchema } from "../../services/orgLogo.js";
-import { authenticate, getCurrentUser, registerOrganizationWithOwner } from "../../services/auth.service.js";
+import { authenticate, getCurrentUser } from "../../services/auth.service.js";
 import { getOrganizationBrief, isPlatformUser } from "../../services/platform.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
-import { rateLimitLogin, rateLimitRegister } from "../middlewares/loginRateLimit.js";
-
-const registerSchema = z.object({
-  orgName: z.string().min(2).max(200),
-  email: z.string().email(),
-  password: z.string().min(8).max(100),
-  logo: logoSchema.optional(),
-});
+import { rateLimitLogin } from "../middlewares/loginRateLimit.js";
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 
-/** Postgres unique_violation error code; pg's driver attaches it as `.code`. */
-function isUniqueViolation(err: unknown): boolean {
-  return typeof err === "object" && err !== null && "code" in err && err.code === "23505";
-}
-
 export async function authRoutes(app: FastifyInstance): Promise<void> {
+  // Accounts are opened by OneSystec (Clientes, in the app), never by the public: this stays answering so old callers get a clear no.
   app.post(
     "/auth/register",
-    {
-      preHandler: rateLimitRegister,
-      schema: {
-        tags: ["Auth"],
-        summary: "Crear una organización nueva con su primer usuario (owner)",
-        body: zodToJsonSchema(registerSchema),
-      },
-    },
-    async (request, reply) => {
-      const parsed = registerSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: parsed.error.flatten() });
-      }
-
-      try {
-        const { orgId, user } = await registerOrganizationWithOwner(parsed.data);
-        const token = app.jwt.sign({ userId: user.id, orgId, role: user.role, allowedArea: user.allowedArea });
-        return reply.code(201).send({ token });
-      } catch (err) {
-        if (isUniqueViolation(err)) {
-          return reply.code(409).send({ error: "Email already registered" });
-        }
-        throw err;
-      }
-    },
+    { schema: { tags: ["Auth"], summary: "Cerrado: las cuentas las crea OneSystec", hide: true } },
+    async (_request, reply) => reply.code(403).send({ error: "Registration is closed: accounts are created by OneSystec" }),
   );
 
   app.post(

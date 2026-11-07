@@ -10,17 +10,14 @@ import { FixedWindowLimiter } from "./rateLimit.js";
 const WINDOW_MS = 15 * 60_000;
 export const LOGIN_LIMITS = { perAddressAndEmail: 10, perAddress: 60 } as const;
 /** Opening organizations is open to anyone, so it gets its own, much tighter, limit per address. */
-export const REGISTER_LIMIT_PER_HOUR = 5;
 
 let byAddressAndEmail = new FixedWindowLimiter(LOGIN_LIMITS.perAddressAndEmail, WINDOW_MS);
 let byAddress = new FixedWindowLimiter(LOGIN_LIMITS.perAddress, WINDOW_MS);
-let registrations = new FixedWindowLimiter(REGISTER_LIMIT_PER_HOUR, 60 * 60_000);
 
 /** For tests: forget every count. */
 export function resetLoginLimits(): void {
   byAddressAndEmail = new FixedWindowLimiter(LOGIN_LIMITS.perAddressAndEmail, WINDOW_MS);
   byAddress = new FixedWindowLimiter(LOGIN_LIMITS.perAddress, WINDOW_MS);
-  registrations = new FixedWindowLimiter(REGISTER_LIMIT_PER_HOUR, 60 * 60_000);
 }
 
 async function refuse(reply: FastifyReply, retryAfterSec: number): Promise<void> {
@@ -52,10 +49,4 @@ export async function rateLimitLogin(request: FastifyRequest, reply: FastifyRepl
     request.log.warn({ address }, "Login attempts blocked: too many from this address");
     await refuse(reply, Math.max(...blocked.map((r) => r.retryAfterSec)));
   }
-}
-
-/** preHandler for POST /auth/register. */
-export async function rateLimitRegister(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  const result = registrations.hit(clientAddress(request));
-  if (!result.allowed) await refuse(reply, result.retryAfterSec);
 }

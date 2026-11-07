@@ -7,7 +7,7 @@ vi.mock("../../src/services/auth.service.js", async (importOriginal) => ({
 }));
 
 const { buildApp } = await import("../../src/api/app.js");
-const { LOGIN_LIMITS, REGISTER_LIMIT_PER_HOUR, resetLoginLimits } = await import("../../src/api/middlewares/loginRateLimit.js");
+const { LOGIN_LIMITS, resetLoginLimits } = await import("../../src/api/middlewares/loginRateLimit.js");
 
 describe("login and registration limits", () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
@@ -64,11 +64,12 @@ describe("login and registration limits", () => {
     expect((await login("a@x.com", "152.233.99.1", { "x-real-ip": "203.0.113.8" })).statusCode).toBe(401);
   });
 
-  it("limits how many organizations one address can open per hour", async () => {
-    const register = () =>
-      app.inject({ method: "POST", url: "/auth/register", remoteAddress: "10.0.0.9", payload: { orgName: "Acme", email: "o@x.com", password: "a-long-password" } });
-    for (let i = 0; i < REGISTER_LIMIT_PER_HOUR; i++) expect((await register()).statusCode).toBe(201);
-    expect((await register()).statusCode).toBe(429);
+  it("keeps public registration closed, however many times it is tried", async () => {
+    for (let i = 0; i < 8; i++) {
+      const res = await app.inject({ method: "POST", url: "/auth/register", remoteAddress: "10.0.0.9", payload: { orgName: "Acme", email: "o@x.com", password: "a-long-password" } });
+      expect(res.statusCode).toBe(403);
+    }
+    expect(mocks.registerOrganizationWithOwner).not.toHaveBeenCalled();
   });
 
   it("adds the security headers to every API answer", async () => {
