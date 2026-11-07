@@ -76,6 +76,8 @@ export async function listOrganizations(): Promise<OrganizationSummary[]> {
 export interface OrganizationDetail extends OrganizationSummary {
   /** The sections this client may have (null: all of them). */
   sections: string[] | null;
+  /** The company logo (data URL), shown in its top bar unless a user has a photo of their own. */
+  logo: string | null;
   members: Array<{ id: string; name: string; email: string; role: string; allowedArea: string | null; logo: string | null }>;
   deviceList: Array<{
     id: string;
@@ -88,7 +90,7 @@ export interface OrganizationDetail extends OrganizationSummary {
 }
 
 export async function getOrganizationDetail(id: string): Promise<OrganizationDetail | undefined> {
-  const [org] = await db.select({ id: organizations.id, modules: organizations.modules }).from(organizations).where(eq(organizations.id, id)).limit(1);
+  const [org] = await db.select({ id: organizations.id, modules: organizations.modules, logo: organizations.logo }).from(organizations).where(eq(organizations.id, id)).limit(1);
   if (!org) return undefined;
   const summary = (await listOrganizations()).find((row) => row.id === id);
   if (!summary) return undefined;
@@ -115,7 +117,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
     ...device,
     vehicle: vehicleName ? { name: vehicleName, plate: vehiclePlate } : null,
   }));
-  return { ...summary, sections: org.modules ?? null, members, deviceList };
+  return { ...summary, sections: org.modules ?? null, logo: org.logo ?? null, members, deviceList };
 }
 
 /** A new client: its organization with its first user (the owner), same as the public sign-up but done by OneSystec. */
@@ -212,4 +214,10 @@ export async function setOrganizationSections(id: string, sections: readonly str
   const clean = sanitizeOrgSections(sections);
   const [updated] = await db.update(organizations).set({ modules: clean }).where(eq(organizations.id, id)).returning({ modules: organizations.modules });
   return updated ? { sections: updated.modules ?? null } : undefined;
+}
+
+/** Puts or removes the company logo of a client: OneSystec gives each client its identity. */
+export async function setOrganizationLogo(id: string, logo: string | null): Promise<{ id: string; logo: string | null } | undefined> {
+  const [updated] = await db.update(organizations).set({ logo }).where(eq(organizations.id, id)).returning({ id: organizations.id, logo: organizations.logo });
+  return updated;
 }

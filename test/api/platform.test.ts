@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getPlatformFleet: vi.fn(),
   setUserLogo: vi.fn(),
   setOrganizationSections: vi.fn(),
+  setOrganizationLogo: vi.fn(),
 }));
 vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
@@ -186,6 +187,31 @@ describe("cross-client administration is for one account alone", () => {
       expect((await app.inject({ method: "PATCH", url: "/platform/organizations/nope/sections", headers, payload: { sections: null } })).statusCode).toBe(400);
       mocks.setOrganizationSections.mockResolvedValue(undefined);
       expect((await app.inject({ method: "PATCH", url: `/platform/organizations/${CLIENT_ORG}/sections`, headers, payload: { sections: [] } })).statusCode).toBe(404);
+    });
+  });
+
+  describe("the company logo of a client", () => {
+    const PNG =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const url = `/platform/organizations/${CLIENT_ORG}/logo`;
+
+    it("is set or removed by OneSystec alone", async () => {
+      mocks.setOrganizationLogo.mockResolvedValue({ id: CLIENT_ORG, logo: PNG });
+      expect((await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "owner", "u1"), payload: { logo: PNG } })).statusCode).toBe(403);
+      expect(mocks.setOrganizationLogo).not.toHaveBeenCalled();
+      const headers = as(SAME_ORG, "admin", "platform-user");
+      expect((await app.inject({ method: "PATCH", url, headers, payload: { logo: PNG } })).statusCode).toBe(200);
+      expect(mocks.setOrganizationLogo).toHaveBeenLastCalledWith(CLIENT_ORG, PNG);
+      await app.inject({ method: "PATCH", url, headers, payload: { logo: null } });
+      expect(mocks.setOrganizationLogo).toHaveBeenLastCalledWith(CLIENT_ORG, null);
+    });
+
+    it("rejects a bad image or id and answers 404 for an unknown client", async () => {
+      const headers = as(SAME_ORG, "admin", "platform-user");
+      expect((await app.inject({ method: "PATCH", url, headers, payload: { logo: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" } })).statusCode).toBe(400);
+      expect((await app.inject({ method: "PATCH", url: "/platform/organizations/nope/logo", headers, payload: { logo: null } })).statusCode).toBe(400);
+      mocks.setOrganizationLogo.mockResolvedValue(undefined);
+      expect((await app.inject({ method: "PATCH", url, headers, payload: { logo: null } })).statusCode).toBe(404);
     });
   });
 });

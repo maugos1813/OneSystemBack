@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { logoSchema } from "../../services/orgLogo.js";
-import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
+import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
@@ -79,6 +79,24 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
       if (!id.success) return reply.code(400).send({ error: "Invalid id" });
       if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
       const updated = await setOrganizationSections(id.data, body.data.sections);
+      if (!updated) return reply.code(404).send({ error: "Organization not found" });
+      return updated;
+    },
+  );
+
+  // The company logo of a client.
+  app.patch<{ Params: { id: string } }>(
+    "/platform/organizations/:id/logo",
+    {
+      ...PLATFORM,
+      schema: { tags: ["Platform"], summary: "Poner o quitar el logo de la empresa de un cliente (solo OneSystec)", security: AUTH },
+    },
+    async (request, reply) => {
+      const id = z.string().uuid().safeParse(request.params.id);
+      const body = z.object({ logo: logoSchema.nullable() }).safeParse(request.body);
+      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
+      if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
+      const updated = await setOrganizationLogo(id.data, body.data.logo);
       if (!updated) return reply.code(404).send({ error: "Organization not found" });
       return updated;
     },
