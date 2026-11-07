@@ -2,13 +2,13 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createFleetAdmin, listFleetDetails, listFleetPictures, setFleetLogo } from "../../services/fleet.service.js";
 import { LANGUAGES } from "../../services/i18n.js";
-import { logoSchema } from "../../services/orgLogo.js";
+import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 
 export const fleetName = z.string().trim().min(1).max(50);
-export const fleetLogoBody = z.object({ name: fleetName, logo: logoSchema.nullable() });
+export const fleetLogoBody = z.object({ name: fleetName, logo: logoSchema.nullable(), tag: logoTagSchema.nullable().optional() });
 export const fleetAdminBody = z.object({
   fleet: fleetName,
   name: z.string().trim().min(1).max(100),
@@ -50,7 +50,7 @@ export async function fleetsRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = fleetLogoBody.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-      return setFleetLogo(request.user.orgId, parsed.data.name, parsed.data.logo);
+      return setFleetLogo(request.user.orgId, parsed.data.name, parsed.data.logo, parsed.data.logo === null ? null : (parsed.data.tag ?? null));
     },
   );
 

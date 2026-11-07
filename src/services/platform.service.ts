@@ -144,7 +144,7 @@ export interface PlatformFleet {
   devices: Device[];
   /** The latest position of each vehicle above, keyed by vehicle id. */
   positions: Record<string, Position>;
-  /** Each client's company logo by its name (`fleetGroup` above): what opens its plates on the map. Clients without one are left out. */
+  /** Each client's logo by its name (`fleetGroup` above), the small copy where there is one: what opens its plates on the map. Clients without one are left out. */
   logos: Record<string, string>;
 }
 
@@ -154,7 +154,7 @@ export interface PlatformFleet {
  */
 export async function getPlatformFleet(): Promise<PlatformFleet> {
   const [orgRows, vehicleRows, deviceRows] = await Promise.all([
-    db.select({ id: organizations.id, name: organizations.name, logo: organizations.logo }).from(organizations),
+    db.select({ id: organizations.id, name: organizations.name, logo: organizations.logo, logoTag: organizations.logoTag }).from(organizations),
     db.select().from(vehicles),
     db.select().from(devices),
   ]);
@@ -203,7 +203,7 @@ export async function getPlatformFleet(): Promise<PlatformFleet> {
     }),
   );
   const logos: Record<string, string> = {};
-  for (const org of orgRows) if (org.logo) logos[org.name] = org.logo;
+  for (const org of orgRows) if (org.logoTag ?? org.logo) logos[org.name] = (org.logoTag ?? org.logo) as string;
   return { vehicles: fleet, devices: deviceRows, positions, logos };
 }
 
@@ -221,7 +221,7 @@ export async function setOrganizationSections(id: string, sections: readonly str
 }
 
 /** Puts or removes the company logo of a client: OneSystec gives each client its identity. */
-export async function setOrganizationLogo(id: string, logo: string | null): Promise<{ id: string; logo: string | null } | undefined> {
-  const [updated] = await db.update(organizations).set({ logo }).where(eq(organizations.id, id)).returning({ id: organizations.id, logo: organizations.logo });
+export async function setOrganizationLogo(id: string, logo: string | null, tag: string | null = null): Promise<{ id: string; logo: string | null } | undefined> {
+  const [updated] = await db.update(organizations).set({ logo, logoTag: tag }).where(eq(organizations.id, id)).returning({ id: organizations.id, logo: organizations.logo });
   return updated;
 }

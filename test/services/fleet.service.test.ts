@@ -28,7 +28,7 @@ beforeAll(async () => {
     CREATE TABLE organizations (id uuid PRIMARY KEY);
     CREATE TABLE vehicles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL DEFAULT 'v', fleet_group varchar(50));
     CREATE TABLE users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL DEFAULT '', email varchar(255) NOT NULL, role text NOT NULL DEFAULT 'viewer', allowed_area varchar(50));
-    CREATE TABLE fleets (org_id uuid NOT NULL, name varchar(50) NOT NULL, logo text, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (org_id, name));
+    CREATE TABLE fleets (org_id uuid NOT NULL, name varchar(50) NOT NULL, logo text, logo_tag text, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (org_id, name));
   `);
 });
 afterAll(async () => {
@@ -72,12 +72,28 @@ describe("the fleets of a client, from what the system already has", () => {
 
   it("keeps a picture for a fleet, replaces it, and forgets it when removed", async () => {
     await setFleetLogo(O1, " DHL ", PNG);
-    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.logo).toBe(PNG);
+    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBe(PNG);
     await setFleetLogo(O1, "DHL", "data:image/png;base64,BBBB");
-    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.logo).toBe("data:image/png;base64,BBBB");
+    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBe("data:image/png;base64,BBBB");
     await setFleetLogo(O1, "DHL", null);
-    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.logo).toBeNull();
+    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBeNull();
     expect((await pg.query(`SELECT count(*)::int n FROM fleets`)).rows).toEqual([{ n: 0 }]);
+  });
+
+  it("gives the map the small copy of the picture, and the full one only when there is no small copy", async () => {
+    const SMALL = "data:image/png;base64,SMALL";
+    await setFleetLogo(O1, "DHL", PNG, SMALL);
+    await setFleetLogo(O1, "UNIVEX", PNG);
+    const pictures = await listFleetPictures(O1);
+    expect(pictures.find((f) => f.name === "DHL")?.tag).toBe(SMALL);
+    expect(pictures.find((f) => f.name === "UNIVEX")?.tag).toBe(PNG);
+    // The management list keeps the full picture and does not carry the small one.
+    const detail = (await listFleetDetails(O1)).find((f) => f.name === "DHL")!;
+    expect(detail.logo).toBe(PNG);
+    expect(detail).not.toHaveProperty("tag");
+    // Replacing the picture without a small copy drops the old small one rather than keeping a stale one.
+    await setFleetLogo(O1, "DHL", "data:image/png;base64,NEW");
+    expect((await listFleetPictures(O1)).find((f) => f.name === "DHL")?.tag).toBe("data:image/png;base64,NEW");
   });
 
   it("lists a fleet that only has a picture (no vehicle, no user yet) and keeps pictures per client", async () => {

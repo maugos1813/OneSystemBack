@@ -106,6 +106,8 @@ export interface UpdateSettingsInput {
   orgName?: string;
   /** A data URL to set the logo, null to remove it, undefined to leave it. */
   orgLogo?: string | null;
+  /** The small copy of that logo for the map's plate tags; cleared whenever the logo changes without one. */
+  orgLogoTag?: string | null;
   workingHours?: Partial<WorkingHours>;
   alerts?: Partial<AlertPreferences>;
 }
@@ -131,7 +133,7 @@ export async function updateSettings(
     .update(organizations)
     .set({
       ...(patch.orgName ? { name: patch.orgName } : {}),
-      ...(patch.orgLogo !== undefined ? { logo: patch.orgLogo } : {}),
+      ...(patch.orgLogo !== undefined ? { logo: patch.orgLogo, logoTag: patch.orgLogo === null ? null : (patch.orgLogoTag ?? null) } : {}),
       settings: next,
     })
     .where(eq(organizations.id, orgId))

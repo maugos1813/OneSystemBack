@@ -204,9 +204,11 @@ describe("cross-client administration is for one account alone", () => {
       expect(mocks.setOrganizationLogo).not.toHaveBeenCalled();
       const headers = as(SAME_ORG, "admin", "platform-user");
       expect((await app.inject({ method: "PATCH", url, headers, payload: { logo: PNG } })).statusCode).toBe(200);
-      expect(mocks.setOrganizationLogo).toHaveBeenLastCalledWith(CLIENT_ORG, PNG);
+      expect(mocks.setOrganizationLogo).toHaveBeenLastCalledWith(CLIENT_ORG, PNG, null);
+      await app.inject({ method: "PATCH", url, headers, payload: { logo: PNG, tag: PNG } });
+      expect(mocks.setOrganizationLogo).toHaveBeenLastCalledWith(CLIENT_ORG, PNG, PNG);
       await app.inject({ method: "PATCH", url, headers, payload: { logo: null } });
-      expect(mocks.setOrganizationLogo).toHaveBeenLastCalledWith(CLIENT_ORG, null);
+      expect(mocks.setOrganizationLogo).toHaveBeenLastCalledWith(CLIENT_ORG, null, null);
     });
 
     it("rejects a bad image or id and answers 404 for an unknown client", async () => {
@@ -236,7 +238,7 @@ describe("cross-client administration is for one account alone", () => {
       expect((await app.inject({ method: "GET", url: base, headers: mine })).statusCode).toBe(200);
       expect(fleetMocks.listFleetDetails).toHaveBeenCalledWith(CLIENT_ORG);
       expect((await app.inject({ method: "PUT", url: `${base}/logo`, headers: mine, payload: { name: "DHL", logo: PNG } })).statusCode).toBe(200);
-      expect(fleetMocks.setFleetLogo).toHaveBeenCalledWith(CLIENT_ORG, "DHL", PNG);
+      expect(fleetMocks.setFleetLogo).toHaveBeenCalledWith(CLIENT_ORG, "DHL", PNG, null);
     });
 
     it("lets OneSystec create the administrator account of a fleet, and 404s for an unknown client", async () => {

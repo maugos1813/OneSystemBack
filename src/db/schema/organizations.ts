@@ -5,6 +5,8 @@ export const organizations = pgTable("organizations", {
   name: varchar("name", { length: 200 }).notNull(),
   /** The client's logo as a data URL (see orgLogo.ts), shown in the top bar. Null until they upload one. */
   logo: text("logo"),
+  /** A small copy of the logo (a few KB) made when it was uploaded: what opens each plate on OneSystec's map. Null: the map uses `logo`. */
+  logoTag: text("logo_tag"),
   plan: varchar("plan", { length: 50 }).notNull().default("free"),
   /** Working hours + alert thresholds — see settings.service.ts for the shape and
    * defaults. Stored as a partial object; missing fields fall back to defaults on read,

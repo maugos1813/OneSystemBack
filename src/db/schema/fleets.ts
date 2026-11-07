@@ -15,6 +15,8 @@ export const fleets = pgTable(
     name: varchar("name", { length: 50 }).notNull(),
     /** The fleet's picture as a data URL (see orgLogo.ts); null falls back to the letters. */
     logo: text("logo"),
+  /** A small copy of the picture (a few KB) made when it was uploaded: what the map draws on each plate. Null: the map uses `logo`. */
+  logoTag: text("logo_tag"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [primaryKey({ columns: [table.orgId, table.name] })],

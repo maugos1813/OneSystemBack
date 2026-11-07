@@ -27,7 +27,7 @@ beforeAll(async () => {
     CREATE TYPE user_role AS ENUM ('owner', 'admin', 'manager', 'viewer');
     CREATE TABLE organizations (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(200) NOT NULL, logo text,
-      plan varchar(50) NOT NULL DEFAULT 'free', settings jsonb NOT NULL DEFAULT '{}', modules text[],
+      plan varchar(50) NOT NULL DEFAULT 'free', settings jsonb NOT NULL DEFAULT '{}', modules text[], logo_tag text,
       created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE users (
@@ -82,6 +82,21 @@ describe("the logo of an organization", () => {
 
     await updateSettings(orgId, { orgLogo: null });
     expect((await getCurrentUser(user.id))?.orgLogo).toBeNull();
+  });
+
+  it("keeps the small copy for the map with the logo, and drops it when the logo changes without one or is removed", async () => {
+    const { orgId } = await registerOrganizationWithOwner({ orgName: "Con copia", email: "t@gamonal.it", password: "supersecret1" });
+    const tagOf = async () => (await db.select().from(organizations).where(eq(organizations.id, orgId)))[0]!.logoTag;
+
+    await updateSettings(orgId, { orgLogo: PNG, orgLogoTag: "data:image/png;base64,TAG" });
+    expect(await tagOf()).toBe("data:image/png;base64,TAG");
+    await updateSettings(orgId, { orgName: "Con copia SRL" });
+    expect(await tagOf()).toBe("data:image/png;base64,TAG");
+    await updateSettings(orgId, { orgLogo: PNG });
+    expect(await tagOf()).toBeNull();
+    await updateSettings(orgId, { orgLogo: PNG, orgLogoTag: "data:image/png;base64,TAG" });
+    await updateSettings(orgId, { orgLogo: null });
+    expect(await tagOf()).toBeNull();
   });
 });
 

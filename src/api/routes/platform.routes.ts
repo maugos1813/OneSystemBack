@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createFleetAdmin, listFleetDetails, setFleetLogo } from "../../services/fleet.service.js";
-import { logoSchema } from "../../services/orgLogo.js";
+import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { fleetAdminBody, fleetLogoBody, isUniqueViolation } from "./fleets.routes.js";
 import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
@@ -106,7 +106,7 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
       if (!id.success) return reply.code(400).send({ error: "Invalid id" });
       if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
       if (!(await getOrganizationBrief(id.data))) return reply.code(404).send({ error: "Organization not found" });
-      return setFleetLogo(id.data, body.data.name, body.data.logo);
+      return setFleetLogo(id.data, body.data.name, body.data.logo, body.data.logo === null ? null : (body.data.tag ?? null));
     },
   );
 
@@ -138,10 +138,10 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const id = z.string().uuid().safeParse(request.params.id);
-      const body = z.object({ logo: logoSchema.nullable() }).safeParse(request.body);
+      const body = z.object({ logo: logoSchema.nullable(), tag: logoTagSchema.nullable().optional() }).safeParse(request.body);
       if (!id.success) return reply.code(400).send({ error: "Invalid id" });
       if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
-      const updated = await setOrganizationLogo(id.data, body.data.logo);
+      const updated = await setOrganizationLogo(id.data, body.data.logo, body.data.logo === null ? null : (body.data.tag ?? null));
       if (!updated) return reply.code(404).send({ error: "Organization not found" });
       return updated;
     },

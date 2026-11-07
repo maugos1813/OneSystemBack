@@ -47,7 +47,11 @@ describe("fleets of the client's own organization", () => {
     expect(mocks.setFleetLogo).not.toHaveBeenCalled();
     expect((await app.inject({ method: "GET", url: "/fleets/manage", headers: as("admin") })).statusCode).toBe(200);
     expect((await app.inject({ method: "PUT", url: "/fleets/logo", headers: as("owner"), payload: { name: "DHL", logo: PNG } })).statusCode).toBe(200);
-    expect(mocks.setFleetLogo).toHaveBeenCalledWith("org-1", "DHL", PNG);
+    expect(mocks.setFleetLogo).toHaveBeenCalledWith("org-1", "DHL", PNG, null);
+    await app.inject({ method: "PUT", url: "/fleets/logo", headers: as("owner"), payload: { name: "DHL", logo: PNG, tag: PNG } });
+    expect(mocks.setFleetLogo).toHaveBeenLastCalledWith("org-1", "DHL", PNG, PNG);
+    await app.inject({ method: "PUT", url: "/fleets/logo", headers: as("owner"), payload: { name: "DHL", logo: null, tag: PNG } });
+    expect(mocks.setFleetLogo).toHaveBeenLastCalledWith("org-1", "DHL", null, null);
   });
 
   it("rejects a bad image or an empty fleet name", async () => {
