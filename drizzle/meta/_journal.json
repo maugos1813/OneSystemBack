@@ -281,6 +281,13 @@
       "when": 1794069610917,
       "tag": "0039_history_six_months",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794073993972,
+      "tag": "0040_gifted_sinister_six",
+      "breakpoints": true
     }
   ]
 }

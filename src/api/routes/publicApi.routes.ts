@@ -6,6 +6,7 @@ import { getApiKey } from "../../services/apiKey.service.js";
 import { DEFAULT_SPEED_LIMIT_KMH, DRIVING_RULES, getDrivingStyle } from "../../services/drivingStyle.service.js";
 import { MAX_WINDOW_DAYS, resolveDrivingWindow } from "../../services/drivingWindow.js";
 import { getDeviceEvents, getPositionHistory } from "../../services/position.service.js";
+import { getVehicleDeviceWindows } from "../../services/vehicleAssignment.service.js";
 import { listPublicVehicles, toPublicEvent, toPublicPosition } from "../../services/publicVehicle.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
 import { requireApiKey } from "../middlewares/auth.middleware.js";
@@ -344,9 +345,11 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
 
         const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
-        if (!vehicle.deviceId) return [];
+        // The vehicle's history is what each device it carried recorded while it was on it.
+        const windows = await getVehicleDeviceWindows(vehicle.id, vehicle.deviceId);
+        if (windows.length === 0) return [];
 
-        return (await getPositionHistory({ deviceId: vehicle.deviceId, ...parsed.data })).map(toPublicPosition);
+        return (await getPositionHistory({ windows, ...parsed.data })).map(toPublicPosition);
       },
     );
 
@@ -382,9 +385,10 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
 
         const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
         if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
-        if (!vehicle.deviceId) return [];
+        const windows = await getVehicleDeviceWindows(vehicle.id, vehicle.deviceId);
+        if (windows.length === 0) return [];
 
-        return (await getDeviceEvents({ deviceId: vehicle.deviceId, ...parsed.data })).map(toPublicEvent);
+        return (await getDeviceEvents({ windows, ...parsed.data })).map(toPublicEvent);
       },
     );
 

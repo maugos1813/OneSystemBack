@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, lte, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { deviceEvents, positions, type DeviceEvent, type Position } from "../db/schema/index.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
@@ -156,8 +156,38 @@ export async function getLatestPosition(deviceId: string): Promise<Position | un
   return { ...newest, lat: lastFix.lat, lng: lastFix.lng, altitude: lastFix.altitude, angle: lastFix.angle };
 }
 
-export interface PositionHistoryQuery {
+/** A stretch of time during which a device was on a vehicle: what that device recorded in it belongs to the vehicle. `to` null: still on it. */
+export interface DeviceWindow {
   deviceId: string;
+  from: Date;
+  to: Date | null;
+}
+
+const EPOCH = new Date(0);
+
+/** The rows of these windows within `from`..`to`: for each window, that device's rows in the part of the window that falls in the range. */
+function windowsCondition(
+  windows: readonly DeviceWindow[],
+  columns: { deviceId: AnyColumn; ts: AnyColumn },
+  from?: Date,
+  to?: Date,
+): SQL | undefined {
+  const parts: SQL[] = [];
+  for (const window of windows) {
+    const start = from && from > window.from ? from : window.from;
+    const end = to && (!window.to || to < window.to) ? to : window.to;
+    if (end && end < start) continue;
+    const conditions = [eq(columns.deviceId, window.deviceId), gte(columns.ts, start)];
+    if (end) conditions.push(lte(columns.ts, end));
+    parts.push(and(...conditions)!);
+  }
+  return parts.length === 0 ? undefined : or(...parts);
+}
+
+export interface PositionHistoryQuery {
+  /** One device, all of its history; or `windows`, the devices a vehicle carried and when (what a vehicle's history is made of). */
+  deviceId?: string;
+  windows?: readonly DeviceWindow[];
   from?: Date;
   to?: Date;
   limit?: number;
@@ -186,14 +216,15 @@ export function thinningKeep(rows: Array<{ ts: Date; speed: number }>, maxPoints
 
 export async function getPositionHistory({
   deviceId,
+  windows,
   from,
   to,
   limit = 500,
   maxPoints,
 }: PositionHistoryQuery): Promise<Position[]> {
-  const conditions = [eq(positions.deviceId, deviceId), WITH_FIX];
-  if (from) conditions.push(gte(positions.ts, from));
-  if (to) conditions.push(lte(positions.ts, to));
+  const span = windowsCondition(windows ?? (deviceId ? [{ deviceId, from: EPOCH, to: null }] : []), positions, from, to);
+  if (!span) return [];
+  const conditions = [span, WITH_FIX];
 
   if (maxPoints) {
     const light = await db
@@ -206,7 +237,7 @@ export async function getPositionHistory({
     return db
       .select()
       .from(positions)
-      .where(and(eq(positions.deviceId, deviceId), inArray(positions.ts, keep)))
+      .where(and(span, inArray(positions.ts, keep)))
       .orderBy(desc(positions.ts));
   }
 
@@ -219,7 +250,9 @@ export async function getPositionHistory({
 }
 
 export interface DeviceEventsQuery {
-  deviceId: string;
+  deviceId?: string;
+  /** The devices a vehicle carried and when (see PositionHistoryQuery). */
+  windows?: readonly DeviceWindow[];
   from?: Date;
   to?: Date;
   limit?: number;
@@ -227,18 +260,18 @@ export interface DeviceEventsQuery {
 
 export async function getDeviceEvents({
   deviceId,
+  windows,
   from,
   to,
   limit = 100,
 }: DeviceEventsQuery): Promise<DeviceEvent[]> {
-  const conditions = [eq(deviceEvents.deviceId, deviceId)];
-  if (from) conditions.push(gte(deviceEvents.ts, from));
-  if (to) conditions.push(lte(deviceEvents.ts, to));
+  const span = windowsCondition(windows ?? (deviceId ? [{ deviceId, from: EPOCH, to: null }] : []), deviceEvents, from, to);
+  if (!span) return [];
 
   return db
     .select()
     .from(deviceEvents)
-    .where(and(...conditions))
+    .where(span)
     .orderBy(desc(deviceEvents.ts))
     .limit(Math.min(limit, 1000));
 }

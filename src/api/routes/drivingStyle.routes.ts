@@ -6,6 +6,7 @@ import {
   getDrivingStyle,
   getVehicleIncidents,
 } from "../../services/drivingStyle.service.js";
+import { getVehicleDeviceWindows } from "../../services/vehicleAssignment.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
 import { requireAuth, requireModule } from "../middlewares/auth.middleware.js";
 
@@ -82,9 +83,11 @@ export async function drivingStyleRoutes(app: FastifyInstance): Promise<void> {
 
       const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
-      if (!vehicle.deviceId) return { incidents: [] };
+      // Every device the vehicle carried, while it was on it: a change of device does not hide the days before it.
+      const windows = await getVehicleDeviceWindows(vehicle.id, vehicle.deviceId);
+      if (windows.length === 0) return { incidents: [] };
 
-      return { incidents: await getVehicleIncidents(vehicle.deviceId, parsed.data.days, parsed.data.speedLimit) };
+      return { incidents: await getVehicleIncidents(windows, parsed.data.days, parsed.data.speedLimit) };
     },
   );
 }

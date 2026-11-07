@@ -5,6 +5,7 @@ import {
   getLatestPosition,
   getPositionHistory,
 } from "../../services/position.service.js";
+import { getVehicleDeviceWindows } from "../../services/vehicleAssignment.service.js";
 import { getVehicleForOrg } from "../../services/vehicle.service.js";
 import { requireAuth, requireModule } from "../middlewares/auth.middleware.js";
 
@@ -76,9 +77,11 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
 
       const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
-      if (!vehicle.deviceId) return reply.code(404).send({ error: "Vehicle has no device assigned" });
+      // The vehicle's history is what each device it carried recorded while it was on it, so a change of device keeps the route.
+      const windows = await getVehicleDeviceWindows(vehicle.id, vehicle.deviceId);
+      if (windows.length === 0) return reply.code(404).send({ error: "Vehicle has no device assigned" });
 
-      return getPositionHistory({ deviceId: vehicle.deviceId, ...parsed.data });
+      return getPositionHistory({ windows, ...parsed.data });
     },
   );
 
@@ -99,9 +102,10 @@ export async function positionsRoutes(app: FastifyInstance): Promise<void> {
 
       const vehicle = await getVehicleForOrg(request.user.orgId, id, request.user.allowedArea);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
-      if (!vehicle.deviceId) return reply.code(404).send({ error: "Vehicle has no device assigned" });
+      const windows = await getVehicleDeviceWindows(vehicle.id, vehicle.deviceId);
+      if (windows.length === 0) return reply.code(404).send({ error: "Vehicle has no device assigned" });
 
-      return getDeviceEvents({ deviceId: vehicle.deviceId, ...parsed.data });
+      return getDeviceEvents({ windows, ...parsed.data });
     },
   );
 }

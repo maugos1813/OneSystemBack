@@ -34,6 +34,12 @@ vi.mock("../../src/services/vehicle.service.js", () => ({
   listVehiclesForOrg: async () => [VEHICLE],
 }));
 
+// This vehicle never changed device: nothing is kept for it, so it falls back to the device it has (all of that device's history).
+vi.mock("../../src/services/vehicleAssignment.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/vehicleAssignment.service.js")>()),
+  getAssignmentWindows: async () => new Map(),
+}));
+
 const { getDrivingStyle, queryStats, summarize } = await import("../../src/services/drivingStyle.service.js");
 
 const DEVICE = VEHICLE.deviceId;

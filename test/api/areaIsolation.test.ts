@@ -54,6 +54,10 @@ beforeAll(async () => {
       angle integer NOT NULL DEFAULT 0, satellites smallint, speed integer NOT NULL DEFAULT 0,
       priority smallint NOT NULL DEFAULT 0, io_data jsonb NOT NULL DEFAULT '{}', PRIMARY KEY (id, ts)
     );
+    CREATE TABLE vehicle_device_assignments (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), vehicle_id uuid NOT NULL, device_id uuid NOT NULL,
+      from_ts timestamptz NOT NULL DEFAULT now(), to_ts timestamptz
+    );
     CREATE TABLE device_events (
       id uuid NOT NULL DEFAULT gen_random_uuid(), device_id uuid NOT NULL, ts timestamptz NOT NULL,
       type varchar(50) NOT NULL, payload jsonb NOT NULL DEFAULT '{}', PRIMARY KEY (id, ts)

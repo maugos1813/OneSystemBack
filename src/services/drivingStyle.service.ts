@@ -1,6 +1,8 @@
 import { inArray, isNotNull, and, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { devices } from "../db/schema/index.js";
+import type { DeviceWindow } from "./position.service.js";
+import { clipWindows, getAssignmentWindows } from "./vehicleAssignment.service.js";
 import { listVehiclesForOrg } from "./vehicle.service.js";
 import { fetchVelocityScores, type VelocityVehicleScores } from "./velocityScores.service.js";
 
@@ -240,17 +242,38 @@ export function summarize(
   };
 }
 
-/** Shared SQL: consecutive-report pairs with the derived gap, heading change and distance. */
-function pairsCte(deviceIdList: ReturnType<typeof sql.join>, from: Date, to: Date) {
+/**
+ * A stretch of one vehicle's life with one device: what that device recorded in `from`..`to` belongs to the vehicle `key`. A vehicle that
+ * changed device has one stretch per device, and its numbers are those of all of them together, in time order.
+ */
+export interface Segment {
+  key: string;
+  deviceId: string;
+  from: Date;
+  to: Date;
+}
+
+const segmentValues = (segments: readonly Segment[]) =>
+  sql.join(
+    segments.map((seg) => sql`(${seg.key}::text, ${seg.deviceId}::uuid, ${seg.from}::timestamptz, ${seg.to}::timestamptz)`),
+    sql`, `,
+  );
+
+/** Shared SQL: the reports of the segments (`posall`, `pos` without the ones that have no fix), and consecutive-report pairs with the derived gap, heading change and distance. */
+function pairsCte(segments: readonly Segment[]) {
   return sql`
+    segs(key, device_id, f, t) as (values ${segmentValues(segments)}),
+    posall as (
+      select sg.key, p.ts, p.lat, p.lng, p.speed, p.angle
+      from positions p join segs sg on p.device_id = sg.device_id and p.ts >= sg.f and p.ts <= sg.t
+    ),
+    pos as (select * from posall where lat <> 0 or lng <> 0),
     s as (
-      select device_id, ts, lat, lng, speed, angle,
+      select key, ts, lat, lng, speed, angle,
              lag(ts) over w as p_ts, lag(speed) over w as p_speed, lag(angle) over w as p_angle,
              lag(lat) over w as p_lat, lag(lng) over w as p_lng
-      from positions
-      where device_id in (${deviceIdList}) and ts >= ${from} and ts <= ${to}
-        and (lat <> 0 or lng <> 0)
-      window w as (partition by device_id order by ts)
+      from pos
+      window w as (partition by key order by ts)
     ), t as (
       select *,
              extract(epoch from (ts - p_ts)) as dt,
@@ -276,13 +299,21 @@ const isCornering = sql`dt > 0 and dt <= ${MAX_DENSE_GAP_S} and speed >= ${MIN_C
   and p_speed >= ${MIN_CORNERING_SPEED_KMH}
   and ((speed + p_speed) / 2.0 / 3.6) * radians(angle_delta) / dt >= ${HARSH_CORNERING_MS2}`;
 
+/** One device's own numbers over a window (the device is the key). */
 export async function queryStats(deviceIds: string[], from: Date, to: Date, speedLimitKmh: number): Promise<Map<string, RawStats>> {
-  if (deviceIds.length === 0) return new Map();
-  const ids = idList(deviceIds);
+  return queryStatsForSegments(
+    deviceIds.map((deviceId) => ({ key: deviceId, deviceId, from, to })),
+    speedLimitKmh,
+  );
+}
+
+/** The numbers of each key (a vehicle) over its segments, which together make up its history whatever devices it carried. */
+export async function queryStatsForSegments(segments: readonly Segment[], speedLimitKmh: number): Promise<Map<string, RawStats>> {
+  if (segments.length === 0) return new Map();
   const plausible = sql`seg_km / (dt / 3600.0) < ${MAX_PLAUSIBLE_KMH}`;
 
   const { rows } = await db.execute<{
-    device_id: string;
+    key: string;
     samples: number;
     km: number;
     dense_km: number;
@@ -293,30 +324,30 @@ export async function queryStats(deviceIds: string[], from: Date, to: Date, spee
     speeding: number;
     trips: number;
   }>(sql`
-    with ${pairsCte(ids, from, to)}, r as (
+    with ${pairsCte(segments)}, r as (
       select *, sum(case when speed > ${speedLimitKmh} and not coalesce(p_speed > ${speedLimitKmh}, false) then 1 else 0 end)
-                  over (partition by device_id order by ts) as run_id
+                  over (partition by key order by ts) as run_id
       from t
     ), runs as (
       -- a stretch over the limit counts once, and only if it lasts: single-report GPS blips don't
-      select device_id, count(*)::int as speeding
+      select key, count(*)::int as speeding
       from (
-        select device_id, run_id from r
+        select key, run_id from r
         where speed > ${speedLimitKmh}
-        group by device_id, run_id
+        group by key, run_id
         having extract(epoch from (max(ts) - min(ts))) >= ${MIN_SPEEDING_STRETCH_S}
       ) q
-      group by device_id
+      group by key
     ), trips as (
-      select device_id, (count(*) filter (where p is null or ts - p >= interval '${sql.raw(String(TRIP_STOP_MINUTES))} minutes'))::int as trips
+      select key, (count(*) filter (where p is null or ts - p >= interval '${sql.raw(String(TRIP_STOP_MINUTES))} minutes'))::int as trips
       from (
-        select device_id, ts, lag(ts) over (partition by device_id order by ts) as p
-        from positions
-        where device_id in (${ids}) and ts >= ${from} and ts <= ${to} and speed > 0
+        select key, ts, lag(ts) over (partition by key order by ts) as p
+        from posall
+        where speed > 0
       ) m
-      group by device_id
+      group by key
     ), agg as (
-      select device_id,
+      select key,
              count(*)::int as samples,
              coalesce(sum(case when dt > 0 and dt <= ${MAX_TRACKED_GAP_S} and ${plausible} then seg_km end), 0)::float as km,
              coalesce(sum(case when dt > 0 and dt <= ${MAX_DENSE_GAP_S} and ${plausible} then seg_km end), 0)::float as dense_km,
@@ -325,17 +356,17 @@ export async function queryStats(deviceIds: string[], from: Date, to: Date, spee
              (count(*) filter (where ${isAcceleration}))::int as acceleration,
              (count(*) filter (where ${isCornering}))::int as cornering
       from t
-      group by device_id
+      group by key
     )
     select a.*, coalesce(runs.speeding, 0) as speeding, coalesce(trips.trips, 0) as trips
     from agg a
-    left join runs on runs.device_id = a.device_id
-    left join trips on trips.device_id = a.device_id
+    left join runs on runs.key = a.key
+    left join trips on trips.key = a.key
   `);
 
   return new Map(
     rows.map((r) => [
-      r.device_id,
+      r.key,
       {
         samples: r.samples,
         distanceKm: r.km,
@@ -361,25 +392,32 @@ export interface DeviceEventCounts {
 /** The device may repeat an event record while it lasts: records of one type closer than this are the same event. */
 const SAME_EVENT_WITHIN_S = 5;
 
+/** One device's own events over a window (the device is the key). */
 export async function queryGreenDrivingCounts(deviceIds: string[], from: Date, to: Date): Promise<Map<string, DeviceEventCounts>> {
+  return queryGreenDrivingCountsForSegments(deviceIds.map((deviceId) => ({ key: deviceId, deviceId, from, to })));
+}
+
+/** The device-reported harsh events of each key (a vehicle) over its segments. */
+export async function queryGreenDrivingCountsForSegments(segments: readonly Segment[]): Promise<Map<string, DeviceEventCounts>> {
   const out = new Map<string, DeviceEventCounts>();
-  if (deviceIds.length === 0) return out;
-  const { rows } = await db.execute<{ device_id: string; kind: number; n: number }>(sql`
-    select device_id, kind, count(*)::int as n from (
-      select device_id, (io_data->>'253')::int as kind, ts,
-             lag(ts) over (partition by device_id, (io_data->>'253') order by ts) as p
-      from positions
-      where device_id in (${idList(deviceIds)}) and ts >= ${from} and ts <= ${to} and (io_data->>'253') in ('1', '2', '3')
+  if (segments.length === 0) return out;
+  const { rows } = await db.execute<{ key: string; kind: number; n: number }>(sql`
+    with segs(key, device_id, f, t) as (values ${segmentValues(segments)})
+    select key, kind, count(*)::int as n from (
+      select sg.key, (p.io_data->>'253')::int as kind, p.ts,
+             lag(p.ts) over (partition by sg.key, (p.io_data->>'253') order by p.ts) as prev
+      from positions p join segs sg on p.device_id = sg.device_id and p.ts >= sg.f and p.ts <= sg.t
+      where (p.io_data->>'253') in ('1', '2', '3')
     ) e
-    where p is null or ts - p > interval '${sql.raw(String(SAME_EVENT_WITHIN_S))} seconds'
-    group by device_id, kind
+    where prev is null or ts - prev > interval '${sql.raw(String(SAME_EVENT_WITHIN_S))} seconds'
+    group by key, kind
   `);
   for (const r of rows) {
-    const counts = out.get(r.device_id) ?? { harshAcceleration: 0, harshBraking: 0, harshCornering: 0 };
+    const counts = out.get(r.key) ?? { harshAcceleration: 0, harshBraking: 0, harshCornering: 0 };
     if (r.kind === 1) counts.harshAcceleration = r.n;
     else if (r.kind === 2) counts.harshBraking = r.n;
     else if (r.kind === 3) counts.harshCornering = r.n;
-    out.set(r.device_id, counts);
+    out.set(r.key, counts);
   }
   return out;
 }
@@ -481,27 +519,45 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
   const fleet = (await listVehiclesForOrg(query.orgId, query.allowedArea)).filter(
     (v) => !query.vehicleId || v.id === query.vehicleId,
   );
-  const deviceIds = fleet.flatMap((v) => (v.deviceId ? [v.deviceId] : []));
-  const statsByDevice = await queryStats(deviceIds, from, to, query.speedLimitKmh);
+  // Each vehicle's numbers are those of every device it carried, while it was on it (see vehicleAssignment.service). A vehicle with no
+  // record at all falls back to the device it has now.
+  const assignments = await getAssignmentWindows(fleet.map((v) => v.id));
+  const segmentsOf = (v: (typeof fleet)[number], start: Date): Segment[] => {
+    const windows = assignments.get(v.id) ?? (v.deviceId ? [{ deviceId: v.deviceId, from: new Date(0), to: null }] : []);
+    return clipWindows(windows, start, to).map((w) => ({ key: v.id, deviceId: w.deviceId, from: w.from, to: w.to ?? to }));
+  };
+  const segments = fleet.flatMap((v) => segmentsOf(v, from));
+  const statsByVehicle = await queryStatsForSegments(segments, query.speedLimitKmh);
 
   // Velocity's method counts the events the DEVICE detects: where a tracker measures them itself (Green Driving switched on), its own
-  // events replace the ones found in the GPS, over the hours since it started (never over hours it was not measuring).
+  // events replace the ones found in the GPS, over the hours since it started (never over hours it was not measuring). A vehicle that
+  // carried several devices in the window keeps the GPS numbers: there is no single device whose own count could stand for it.
   const measuredSince = new Map<string, Date>();
   if (scoring === "per_hour") {
-    const measuring = await db
-      .select({ id: devices.id, since: devices.greenDrivingSince })
-      .from(devices)
-      .where(and(inArray(devices.id, deviceIds.length > 0 ? deviceIds : ["00000000-0000-0000-0000-000000000000"]), isNotNull(devices.greenDrivingSince)));
-    for (const { id, since } of measuring) {
-      const start = since && since > from ? since : from;
-      if (!since || start >= to) continue;
-      const [gps, events] = await Promise.all([queryStats([id], start, to, query.speedLimitKmh), queryGreenDrivingCounts([id], start, to)]);
-      const own = gps.get(id);
+    const deviceIds = [...new Set(segments.map((seg) => seg.deviceId))];
+    const measuring = new Map(
+      (
+        await db
+          .select({ id: devices.id, since: devices.greenDrivingSince })
+          .from(devices)
+          .where(and(inArray(devices.id, deviceIds.length > 0 ? deviceIds : ["00000000-0000-0000-0000-000000000000"]), isNotNull(devices.greenDrivingSince)))
+      ).map((row) => [row.id, row.since] as const),
+    );
+    for (const v of fleet) {
+      const own = segments.filter((seg) => seg.key === v.id);
+      const only = own.length === 1 ? own[0]! : undefined;
+      const since = only ? measuring.get(only.deviceId) : undefined;
+      if (!only || !since) continue;
+      const start = since > only.from ? since : only.from;
+      if (start >= only.to) continue;
+      const segment = { ...only, from: start };
+      const [gps, events] = await Promise.all([queryStatsForSegments([segment], query.speedLimitKmh), queryGreenDrivingCountsForSegments([segment])]);
+      const mine = gps.get(v.id);
       // Too few hours measured yet to judge by: the GPS-based score stands until there are.
-      if (!own || own.movingSeconds / 3600 < VELOCITY_METHOD.minHours) continue;
-      const counts = events.get(id) ?? { harshAcceleration: 0, harshBraking: 0, harshCornering: 0 };
-      statsByDevice.set(id, { ...own, denseKm: own.distanceKm, ...counts });
-      measuredSince.set(id, start);
+      if (!mine || mine.movingSeconds / 3600 < VELOCITY_METHOD.minHours) continue;
+      const counts = events.get(v.id) ?? { harshAcceleration: 0, harshBraking: 0, harshCornering: 0 };
+      statsByVehicle.set(v.id, { ...mine, denseKm: mine.distanceKm, ...counts });
+      measuredSince.set(v.id, start);
     }
   }
 
@@ -511,9 +567,9 @@ export async function getDrivingStyle(query: DrivingStyleQuery): Promise<Driving
     plate: v.plate,
     fleetGroup: v.fleetGroup,
     source: "onetrack" as const,
-    eventSource: v.deviceId && measuredSince.has(v.deviceId) ? ("device" as const) : ("gps" as const),
-    measuredSince: v.deviceId ? (measuredSince.get(v.deviceId)?.toISOString() ?? null) : null,
-    ...summarize(v.deviceId ? statsByDevice.get(v.deviceId) : undefined, scoring),
+    eventSource: measuredSince.has(v.id) ? ("device" as const) : ("gps" as const),
+    measuredSince: measuredSince.get(v.id)?.toISOString() ?? null,
+    ...summarize(statsByVehicle.get(v.id), scoring),
   }));
 
   const closed = exactWindow && Date.now() - to.getTime() > CLOSED_WINDOW_AFTER_MS;
@@ -535,15 +591,19 @@ export interface DrivingIncident {
 
 const MAX_INCIDENTS = 500;
 
-/** Where and when each incident happened (newest MAX_INCIDENTS, returned oldest -> newest). */
+/**
+ * Where and when each incident happened (newest MAX_INCIDENTS, returned oldest -> newest). `windows` are the devices the vehicle
+ * carried and when, so a change of device does not hide the days before it.
+ */
 export async function getVehicleIncidents(
-  deviceId: string,
+  windows: readonly DeviceWindow[],
   days: number,
   speedLimitKmh: number,
 ): Promise<DrivingIncident[]> {
   const to = new Date();
   const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
-  const ids = idList([deviceId]);
+  const segments = clipWindows(windows, from, to).map((w) => ({ key: "vehicle", deviceId: w.deviceId, from: w.from, to: w.to ?? to }));
+  if (segments.length === 0) return [];
 
   const { rows } = await db.execute<{
     type: IncidentType;
@@ -554,7 +614,7 @@ export async function getVehicleIncidents(
     speed: number;
     angle_delta: number | null;
   }>(sql`
-    with ${pairsCte(ids, from, to)}, r as (
+    with ${pairsCte(segments)}, r as (
       select *, sum(case when speed > ${speedLimitKmh} and not coalesce(p_speed > ${speedLimitKmh}, false) then 1 else 0 end)
                   over (order by ts) as run_id
       from t

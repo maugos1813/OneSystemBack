@@ -2,9 +2,8 @@ import { date, doublePrecision, pgTable, primaryKey, timestamp, uuid } from "dri
 import { vehicles } from "./vehicles.js";
 
 /**
- * How far each vehicle drove each day (Rome calendar day), added up from its GPS positions. Positions are pruned
- * (Radius Velocity routes after 7 days, the rest after 3 months), this is the small permanent record the maintenance
- * plans count their kilometres from. Written by services/dailyKm.service.ts.
+ * How far each vehicle drove each day (Rome calendar day), added up from its GPS positions. Positions are dropped after
+ * 6 months, this is the small permanent record the maintenance plans count their kilometres from. Written by services/dailyKm.service.ts.
  */
 export const vehicleDailyKm = pgTable(
   "vehicle_daily_km",
