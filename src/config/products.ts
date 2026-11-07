@@ -27,14 +27,14 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
   { key: "gps", name: "OneTrack", type: "internal", path: "/gps" },
   {
     key: "driver",
-    name: "Gamonal Driver",
+    name: "ONE DRIVER EXPRESS",
     type: "external",
     url: "https://app-gamonal-trasporti-front.vercel.app/login",
     ssoEnabled: true,
   },
   {
     key: "farmacy",
-    name: "Gamonal Farmacy",
+    name: "ONE DRIVER SALUTE",
     type: "external",
     // Mismo backend/frontend que Gamonal Driver (bgamonal19/gamonal-dryver---farmacia),
     // solo que por el dominio original de Vercel en vez del alias falconext-logistica-web.
@@ -45,7 +45,7 @@ export const PRODUCT_CATALOG: ProductCatalogEntry[] = [
     key: "nakamacar",
     name: "NakamaCar",
     type: "external",
-    url: "https://nakamacar.gamaagostinelli.cl/login",
+    url: "https://web-theta-umber-70.vercel.app/login",
     ssoEnabled: true,
   },
 ];
