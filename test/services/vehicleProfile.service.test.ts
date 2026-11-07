@@ -60,6 +60,11 @@ beforeAll(async () => {
       created_at timestamptz NOT NULL DEFAULT now()
     );
   `);
+  // Which device a vehicle carried and when (the km are counted from the devices a vehicle carried).
+  await pg.exec(`CREATE TABLE vehicle_device_assignments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), vehicle_id uuid NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+    device_id uuid NOT NULL, from_ts timestamptz NOT NULL DEFAULT now(), to_ts timestamptz
+  );`);
   for (const file of ["0017_maintenance.sql", "0029_vehicle_daily_km.sql"]) {
     const migration = readFileSync(new URL(`../../drizzle/${file}`, import.meta.url), "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
@@ -85,6 +90,7 @@ beforeEach(async () => {
     { id: V_GPS, orgId: ORG, name: "VAN-2", fleetGroup: "UNIVEX", deviceId: null },
     { id: V_OTHER, orgId: OTHER_ORG, name: "OTHER", fleetGroup: null, deviceId: null },
   ]);
+  await clientModule.__pg.exec(`INSERT INTO vehicle_device_assignments (vehicle_id, device_id, from_ts) VALUES ('${V_OBD}', '${DEVICE}', 'epoch');`);
   harness.hasPosition = true;
   harness.earlierIoData = null;
   harness.ioData = { "389": 8000 }; // the car's own odometer, read through OBD
@@ -143,6 +149,7 @@ describe("counting from the moment the km were typed, not from the next day", ()
     harness.hasPosition = false; // this tracker does not read the car's own odometer
     await clientModule.__pg.exec(`INSERT INTO devices VALUES ('${DEV_GPS}') ON CONFLICT DO NOTHING;`);
     await db.update(vehicles).set({ deviceId: DEV_GPS }).where(eq(vehicles.id, V_GPS));
+    await clientModule.__pg.exec(`INSERT INTO vehicle_device_assignments (vehicle_id, device_id, from_ts) VALUES ('${V_GPS}', '${DEV_GPS}', 'epoch');`);
   });
 
   it("the same day moves as soon as the vehicle drives after the reading (what was driven before it is already in it)", async () => {

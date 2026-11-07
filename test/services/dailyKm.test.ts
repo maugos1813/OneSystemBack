@@ -28,6 +28,10 @@ beforeAll(async () => {
       lng double precision NOT NULL, altitude integer NOT NULL DEFAULT 0, angle integer NOT NULL DEFAULT 0, satellites smallint,
       speed integer NOT NULL DEFAULT 0, priority smallint NOT NULL DEFAULT 0, io_data jsonb NOT NULL DEFAULT '{}', PRIMARY KEY (id, ts)
     );
+    CREATE TABLE vehicle_device_assignments (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), vehicle_id uuid NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+      device_id uuid NOT NULL, from_ts timestamptz NOT NULL DEFAULT now(), to_ts timestamptz
+    );
     CREATE TABLE vehicle_daily_km (
       vehicle_id uuid NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE, day date NOT NULL, km double precision NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (vehicle_id, day)
@@ -40,8 +44,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await pg.exec(`DELETE FROM vehicle_daily_km; DELETE FROM positions; DELETE FROM vehicles;
-    INSERT INTO vehicles (id, device_id) VALUES ('${VEHICLE}', '${DEVICE}'), ('${OTHER_VEHICLE}', '${OTHER_DEVICE}');`);
+  await pg.exec(`DELETE FROM vehicle_daily_km; DELETE FROM vehicle_device_assignments; DELETE FROM positions; DELETE FROM vehicles;
+    INSERT INTO vehicles (id, device_id) VALUES ('${VEHICLE}', '${DEVICE}'), ('${OTHER_VEHICLE}', '${OTHER_DEVICE}');
+    INSERT INTO vehicle_device_assignments (vehicle_id, device_id, from_ts) SELECT id, device_id, 'epoch' FROM vehicles WHERE device_id IS NOT NULL;`);
 });
 
 interface Point {
@@ -136,6 +141,39 @@ describe("recomputeDailyKm", () => {
     await report(DEVICE, drive("2026-10-10T08:00:00Z", 4));
     await km.recomputeDailyKm("2026-10-08");
     expect(await dailyOf()).toEqual({ "2026-10-10": 2 });
+  });
+});
+
+describe("a vehicle that changed device", () => {
+  const NEW_DEVICE = "00000000-0000-0000-0000-0000000000d3";
+  /** The van carried DEVICE until 12:00 on the 10th and carries NEW_DEVICE since. */
+  async function swap() {
+    await pg.exec(`UPDATE vehicle_device_assignments SET to_ts = '2026-10-10T12:00:00Z' WHERE vehicle_id = '${VEHICLE}';
+      INSERT INTO vehicle_device_assignments (vehicle_id, device_id, from_ts) VALUES ('${VEHICLE}', '${NEW_DEVICE}', '2026-10-10T12:00:00Z');
+      UPDATE vehicles SET device_id = '${NEW_DEVICE}' WHERE id = '${VEHICLE}';`);
+  }
+
+  it("adds up both devices on the day of the swap, and the old one's drive is not lost when the days are recomputed", async () => {
+    await report(DEVICE, drive("2026-10-10T08:00:00Z", 20)); // 10 km before the swap
+    await km.recomputeDailyKm("2026-10-01");
+    await swap();
+    await report(NEW_DEVICE, drive("2026-10-10T14:00:00Z", 10)); // 5 km after it
+    await km.recomputeDailyKm("2026-10-01"); // the scheduler re-adds the last days every half hour
+    expect(await dailyOf()).toEqual({ "2026-10-10": 15 });
+  });
+
+  it("does not count what the old device drives on another vehicle afterwards", async () => {
+    await swap();
+    await report(DEVICE, drive("2026-10-10T14:00:00Z", 20)); // the old device, now on another van
+    await km.recomputeDailyKm("2026-10-01");
+    expect(await dailyOf()).toEqual({});
+  });
+
+  it("measures a stretch across the swap, for the live part of the odometer", async () => {
+    await report(DEVICE, drive("2026-10-10T08:00:00Z", 20));
+    await swap();
+    await report(NEW_DEVICE, drive("2026-10-10T14:00:00Z", 10));
+    expect(Math.round(await km.kmBetween(VEHICLE, new Date("2026-10-10T07:00:00Z"), new Date("2026-10-10T18:00:00Z")))).toBe(15);
   });
 });
 

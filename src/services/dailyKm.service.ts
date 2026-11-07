@@ -12,6 +12,8 @@ import { vehicleDailyKm } from "../db/schema/index.js";
  *  - the implied speed is possible (a GPS jump is not a drive),
  *  - and the vehicle was moving by its own reported speed (a parked vehicle's GPS wanders a few metres, and those
  *    metres added up over a night would count as kilometres).
+ * A vehicle that changed device keeps counting: each device's reports belong to the vehicle for the time it carried it
+ * (vehicle_device_assignments), so the days near the swap are added up from both.
  * Straight lines between reports cut corners, so a count over sparse reports (Velocity: every 30 s) reads a little low,
  * a few percent. That is what the optional dashboard correction on a plan is for.
  */
@@ -45,12 +47,13 @@ export async function recomputeDailyKm(fromDay: string): Promise<number> {
     with window_start as (
       select (${fromDay}::date)::timestamp at time zone ${KM_TIMEZONE} as ts
     ), s as (
-      select p.device_id, p.ts, p.lat, p.lng, p.speed,
+      select a.vehicle_id, p.device_id, p.ts, p.lat, p.lng, p.speed,
              lag(p.ts) over w as p_ts, lag(p.lat) over w as p_lat, lag(p.lng) over w as p_lng, lag(p.speed) over w as p_speed
       from positions p
-      where p.device_id in (select device_id from vehicles where device_id is not null)
-        and p.ts >= (select ts from window_start) and (p.lat <> 0 or p.lng <> 0)
-      window w as (partition by p.device_id order by p.ts)
+      join vehicle_device_assignments a
+        on a.device_id = p.device_id and p.ts >= a.from_ts and (a.to_ts is null or p.ts < a.to_ts)
+      where p.ts >= (select ts from window_start) and (p.lat <> 0 or p.lng <> 0)
+      window w as (partition by a.vehicle_id, p.device_id order by p.ts)
     ), t as (
       select *, extract(epoch from (ts - p_ts)) as dt,
              6371 * 2 * asin(sqrt(least(1,
@@ -59,8 +62,8 @@ export async function recomputeDailyKm(fromDay: string): Promise<number> {
       from s
       where p_ts is not null
     ), daily as (
-      select v.id as vehicle_id, ((t.ts at time zone ${KM_TIMEZONE})::date) as day, sum(t.seg_km)::float as km
-      from t join vehicles v on v.device_id = t.device_id
+      select t.vehicle_id, ((t.ts at time zone ${KM_TIMEZONE})::date) as day, sum(t.seg_km)::float as km
+      from t
       where t.dt > 0 and t.dt <= ${MAX_GAP_S}
         and t.seg_km / (t.dt / 3600.0) < ${MAX_PLAUSIBLE_KMH}
         and greatest(t.speed, t.p_speed) >= ${MIN_MOVING_KMH}
@@ -99,9 +102,10 @@ export async function kmBetween(vehicleId: string, from: Date, to: Date): Promis
       select p.ts, p.lat, p.lng, p.speed,
              lag(p.ts) over w as p_ts, lag(p.lat) over w as p_lat, lag(p.lng) over w as p_lng, lag(p.speed) over w as p_speed
       from positions p
-      where p.device_id = (select device_id from vehicles where id = ${vehicleId})
-        and p.ts >= ${from.toISOString()}::timestamptz and p.ts < ${to.toISOString()}::timestamptz and (p.lat <> 0 or p.lng <> 0)
-      window w as (order by p.ts)
+      join vehicle_device_assignments a
+        on a.vehicle_id = ${vehicleId} and a.device_id = p.device_id and p.ts >= a.from_ts and (a.to_ts is null or p.ts < a.to_ts)
+      where p.ts >= ${from.toISOString()}::timestamptz and p.ts < ${to.toISOString()}::timestamptz and (p.lat <> 0 or p.lng <> 0)
+      window w as (partition by p.device_id order by p.ts)
     ), t as (
       select *, extract(epoch from (ts - p_ts)) as dt,
              6371 * 2 * asin(sqrt(least(1,
