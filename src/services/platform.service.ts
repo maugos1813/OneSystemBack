@@ -73,7 +73,7 @@ export async function listOrganizations(): Promise<OrganizationSummary[]> {
 }
 
 export interface OrganizationDetail extends OrganizationSummary {
-  members: Array<{ id: string; name: string; email: string; role: string; allowedArea: string | null }>;
+  members: Array<{ id: string; name: string; email: string; role: string; allowedArea: string | null; logo: string | null }>;
   deviceList: Array<{
     id: string;
     imei: string;
@@ -90,7 +90,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
   const summary = (await listOrganizations()).find((row) => row.id === id);
   if (!summary) return undefined;
   const members = await db
-    .select({ id: users.id, name: users.name, email: users.email, role: users.role, allowedArea: users.allowedArea })
+    .select({ id: users.id, name: users.name, email: users.email, role: users.role, allowedArea: users.allowedArea, logo: users.logo })
     .from(users)
     .where(eq(users.orgId, id))
     .orderBy(asc(users.createdAt));
@@ -196,4 +196,10 @@ export async function getPlatformFleet(): Promise<PlatformFleet> {
     }),
   );
   return { vehicles: fleet, devices: deviceRows, positions };
+}
+
+/** Puts or removes the profile photo of any user, in any client: it is OneSystec who gives each client its identity. */
+export async function setUserLogo(userId: string, logo: string | null): Promise<{ id: string; logo: string | null } | undefined> {
+  const [updated] = await db.update(users).set({ logo }).where(eq(users.id, userId)).returning({ id: users.id, logo: users.logo });
+  return updated;
 }

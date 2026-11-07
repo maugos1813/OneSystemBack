@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { logoSchema } from "../../services/orgLogo.js";
-import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations } from "../../services/platform.service.js";
+import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
 
 const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
@@ -63,6 +63,24 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
         { expiresIn: "2h" },
       );
       return { token, orgId: org.id, orgName: org.name };
+    },
+  );
+
+  // The photo (logo) of a client's user, e.g. the account holder of a client: OneSystec sets it for them.
+  app.patch<{ Params: { userId: string } }>(
+    "/platform/users/:userId/logo",
+    {
+      ...PLATFORM,
+      schema: { tags: ["Platform"], summary: "Poner o quitar la foto de un usuario de un cliente (solo OneSystec)", security: AUTH },
+    },
+    async (request, reply) => {
+      const id = z.string().uuid().safeParse(request.params.userId);
+      const body = z.object({ logo: logoSchema.nullable() }).safeParse(request.body);
+      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
+      if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
+      const updated = await setUserLogo(id.data, body.data.logo);
+      if (!updated) return reply.code(404).send({ error: "User not found" });
+      return updated;
     },
   );
 

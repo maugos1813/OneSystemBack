@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getOrganizationDetail: vi.fn(),
   getOrganizationBrief: vi.fn(),
   getPlatformFleet: vi.fn(),
+  setUserLogo: vi.fn(),
 }));
 vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
@@ -134,6 +135,34 @@ describe("cross-client administration is for one account alone", () => {
       const token = app.jwt.sign({ userId: "platform-user", orgId: CLIENT_ORG, role: "admin", allowedArea: null, viewAs: true } as never);
       const res = await app.inject({ method: "GET", url: "/platform/fleet", headers: { authorization: `Bearer ${token}` } });
       expect(res.statusCode).toBe(403);
+    });
+  });
+
+  describe("the photo of a client's user", () => {
+    const USER = "423e4567-e89b-12d3-a456-426614174000";
+    const PNG =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+    it("is set by OneSystec for any user, and by nobody else", async () => {
+      mocks.setUserLogo.mockResolvedValue({ id: USER, logo: PNG });
+      const url = `/platform/users/${USER}/logo`;
+      expect((await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "owner", "u1"), payload: { logo: PNG } })).statusCode).toBe(403);
+      expect(mocks.setUserLogo).not.toHaveBeenCalled();
+      const ok = await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "admin", "platform-user"), payload: { logo: PNG } });
+      expect(ok.statusCode).toBe(200);
+      expect(mocks.setUserLogo).toHaveBeenCalledWith(USER, PNG);
+      const cleared = await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "admin", "platform-user"), payload: { logo: null } });
+      expect(cleared.statusCode).toBe(200);
+      expect(mocks.setUserLogo).toHaveBeenLastCalledWith(USER, null);
+    });
+
+    it("rejects a bad image or id, and answers 404 for an unknown user", async () => {
+      const headers = as(SAME_ORG, "admin", "platform-user");
+      const bad = await app.inject({ method: "PATCH", url: `/platform/users/${USER}/logo`, headers, payload: { logo: "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" } });
+      expect(bad.statusCode).toBe(400);
+      expect((await app.inject({ method: "PATCH", url: "/platform/users/nope/logo", headers, payload: { logo: null } })).statusCode).toBe(400);
+      mocks.setUserLogo.mockResolvedValue(undefined);
+      expect((await app.inject({ method: "PATCH", url: `/platform/users/${USER}/logo`, headers, payload: { logo: null } })).statusCode).toBe(404);
     });
   });
 });
