@@ -118,3 +118,13 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
 export async function createClientOrganization(input: { orgName: string; email: string; password: string; logo?: string }) {
   return registerOrganizationWithOwner(input);
 }
+
+/** Just enough of an organization to say whose account is being looked at. */
+export async function getOrganizationBrief(id: string): Promise<{ id: string; name: string; logo: string | null } | undefined> {
+  const [org] = await db
+    .select({ id: organizations.id, name: organizations.name, logo: organizations.logo })
+    .from(organizations)
+    .where(eq(organizations.id, id))
+    .limit(1);
+  return org;
+}

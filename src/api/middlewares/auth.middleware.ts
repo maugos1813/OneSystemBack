@@ -26,6 +26,22 @@ export function isApiKeyRequestAllowed(method: string, url: string): boolean {
  * `Authorization: Bearer <token>` header, and populates request.user either way so
  * every route downstream only ever deals with { userId, orgId, role }.
  */
+/** Reading is all a "viewing as a client" token may do (OneSystec looking at a client's account). */
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
+/** Refuses any change made with a view-only token. Called by every route that verifies a login token itself. */
+export async function rejectViewOnlyWrites(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (!request.user?.viewAs) return;
+  // The token is only good while its holder is still one of OneSystec's people.
+  if (!(await isPlatformUser(request.user.userId))) {
+    await reply.code(403).send({ error: "Forbidden" });
+    return;
+  }
+  if (!SAFE_METHODS.has(request.method)) {
+    await reply.code(403).send({ error: "Estás viendo la cuenta de un cliente: es solo lectura" });
+  }
+}
+
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const authHeader = request.headers.authorization;
   const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
@@ -51,7 +67,9 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     await request.jwtVerify();
   } catch {
     await reply.code(401).send({ error: "Unauthorized" });
+    return;
   }
+  await rejectViewOnlyWrites(request, reply);
 }
 
 /** For the public /v1 API: only API keys, never a login JWT. */

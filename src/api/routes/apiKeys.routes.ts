@@ -4,7 +4,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ApiKey } from "../../db/schema/index.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../services/apiKey.service.js";
 import { fleetGroupExists } from "../../services/vehicle.service.js";
-import { requireRole } from "../middlewares/auth.middleware.js";
+import { rejectViewOnlyWrites, requireRole } from "../middlewares/auth.middleware.js";
 
 const createSchema = z.object({
   name: z.string().min(2).max(100),
@@ -33,7 +33,9 @@ async function requireUserAuth(request: FastifyRequest, reply: FastifyReply): Pr
     await request.jwtVerify();
   } catch {
     await reply.code(401).send({ error: "Unauthorized" });
+    return;
   }
+  await rejectViewOnlyWrites(request, reply);
 }
 
 export async function apiKeysRoutes(app: FastifyInstance): Promise<void> {
