@@ -115,3 +115,61 @@ export async function sendAlertDigest(to: string, orgName: string, alerts: Alert
     logger.error({ err, to, orgName }, "Failed to send alert email");
   }
 }
+
+const LOGIN_CODE_COPY: Record<Language, { subject: (code: string) => string; heading: string; body: string; expires: string; ignore: string }> = {
+  es: {
+    subject: (code) => `${code} es tu código de acceso a OneSystec`,
+    heading: "Tu código de acceso",
+    body: "Escribe este código en la pantalla de inicio de sesión:",
+    expires: "Vence en 10 minutos y sirve una sola vez.",
+    ignore: "Si no intentaste entrar, ignora este correo y cambia tu contraseña: alguien la conoce.",
+  },
+  it: {
+    subject: (code) => `${code} è il tuo codice di accesso a OneSystec`,
+    heading: "Il tuo codice di accesso",
+    body: "Inserisci questo codice nella schermata di accesso:",
+    expires: "Scade tra 10 minuti e vale una sola volta.",
+    ignore: "Se non hai provato ad accedere, ignora questa e-mail e cambia la password: qualcuno la conosce.",
+  },
+};
+
+/** Whether the sign-in codes can go out by email at all: Resend is set up and there is a sender on a verified domain. */
+export function canEmailLoginCodes(): boolean {
+  return !!resend && !!env.AUTH_EMAIL_FROM;
+}
+
+/** The 6-digit sign-in code, by email. True only if the provider accepted the message (Resend reports its refusals instead of throwing). */
+export async function sendLoginCodeEmail(to: string, code: string, language: Language = "es"): Promise<boolean> {
+  if (!resend || !env.AUTH_EMAIL_FROM) return false;
+  const copy = pick(language, LOGIN_CODE_COPY);
+  try {
+    const { error } = await resend.emails.send({
+      from: env.AUTH_EMAIL_FROM,
+      to,
+      subject: copy.subject(code),
+      html: `
+        <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f6fb;padding:32px 16px;">
+          <div style="max-width:420px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,0.06);">
+            <div style="background:linear-gradient(135deg,#38bdf8,#3b82f6,#7c3aed);padding:20px 24px;">
+              <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;">OneSystec</p>
+              <p style="margin:2px 0 0;color:#e0e7ff;font-size:13px;">${copy.heading}</p>
+            </div>
+            <div style="padding:24px;">
+              <p style="margin:0 0 12px;color:#334155;font-size:14px;">${copy.body}</p>
+              <p style="margin:0 0 16px;text-align:center;font-size:34px;font-weight:700;letter-spacing:8px;color:#0f172a;">${escapeHtml(code)}</p>
+              <p style="margin:0 0 8px;color:#64748b;font-size:13px;">${copy.expires}</p>
+              <p style="margin:0;color:#94a3b8;font-size:12px;">${copy.ignore}</p>
+            </div>
+          </div>
+        </div>`,
+    });
+    if (error) {
+      logger.error({ err: error, to }, "The email provider refused the sign-in code");
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.error({ err, to }, "Failed to send the sign-in code");
+    return false;
+  }
+}

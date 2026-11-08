@@ -1,4 +1,4 @@
-import { boolean, index, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { users } from "./users.js";
 
 /**
@@ -52,3 +52,23 @@ export const userRecoveryCodes = pgTable(
 );
 
 export type UserSession = typeof userSessions.$inferSelect;
+
+/**
+ * The 6-digit code emailed to someone signing in from a phone (see emailCode.service.ts). Only a keyed hash is kept; a new code
+ * replaces the older ones, and it dies after use, after a few wrong tries or after ten minutes.
+ */
+export const userEmailCodes = pgTable(
+  "user_email_codes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  },
+  (table) => [index("user_email_codes_user_idx").on(table.userId)],
+);

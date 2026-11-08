@@ -36,6 +36,10 @@ const envSchema = z.object({
   // Firebase service-account key (the whole JSON, on one line) used to send push notifications to the OneTrack app
   // through FCM. Left unset, alerts still show in the app and go by email; only the phone notification is skipped.
   FIREBASE_SERVICE_ACCOUNT_JSON: z.string().optional(),
+  // Sender of the 6-digit sign-in codes sent by email to people signing in from a phone, e.g. "OneSystec <seguridad@tu-dominio.com>".
+  // It must be an address of a domain verified in Resend (the test sender only delivers to the Resend account's owner). Left unset
+  // (or without RESEND_API_KEY), the phone sign-in keeps using the authenticator app: nobody is locked out.
+  AUTH_EMAIL_FROM: z.string().optional(),
   ALERT_EMAIL_FROM: z.string().default("OneSystec Alertas <onboarding@resend.dev>"),
   // Comma-separated emails of the people who run the platform (OneSystec). Only they get the cross-client administration
   // (/platform/*), whatever organization their account sits in; everyone else is a client. Unset, nobody has it.

@@ -8,8 +8,9 @@ import type { SessionClient } from "./userSession.service.js";
  * nothing else: it is signed with a key of its own (derived from JWT_SECRET), so it can never be taken for a login token.
  *  - "mfa": the account has an authenticator; the code is what's missing.
  *  - "mfa-setup": the account must have one (an admin) and doesn't yet; setting it up is what's missing.
+ *  - "mfa-email": a phone sign-in; the code sent to the account's email is what's missing.
  */
-export type MfaPurpose = "mfa" | "mfa-setup";
+export type MfaPurpose = "mfa" | "mfa-setup" | "mfa-email";
 
 const TTL_SECONDS = 10 * 60;
 const key = (): string => createHash("sha256").update(`mfa-token:${env.JWT_SECRET}`).digest("hex");

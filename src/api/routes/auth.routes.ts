@@ -11,6 +11,8 @@ import {
   startTotpSetup,
   verifySecondFactor,
 } from "../../services/mfa.service.js";
+import { issueEmailCode, isEmailCodeLoginAvailable, maskEmail, verifyEmailCode } from "../../services/emailCode.service.js";
+import { toLanguage } from "../../services/i18n.js";
 import { signMfaToken, verifyMfaToken } from "../../services/mfaToken.js";
 import { recordLoginFailure } from "../../services/platformAlerts.service.js";
 import { getOrganizationBrief, isPlatformUser } from "../../services/platform.service.js";
@@ -35,7 +37,11 @@ const loginSchema = z.object({
   password: z.string().min(1),
   /** "app" for the Android apps (their sessions last longer), "web" for a browser. */
   client: clientSchema,
+  /** "phone" when the person is on a phone (the app, or a phone's browser): there the second step is a code sent by email. */
+  channel: z.enum(["web", "phone"]).default("web"),
 });
+const emailLoginSchema = z.object({ mfaToken: z.string().min(1), code: z.string().min(6).max(8) });
+const emailResendSchema = z.object({ mfaToken: z.string().min(1) });
 
 const code = z.string().min(6).max(8);
 const mfaLoginSchema = z
@@ -112,7 +118,26 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      const { client } = parsed.data;
+      const { client, channel } = parsed.data;
+      const needsSecondStep = !!user.totpEnabledAt || isTotpRequired(user.role);
+      // On a phone nobody can scan a QR shown on that same screen, so there the second step is a code sent to the account's email
+      // (when email is set up; otherwise the authenticator app is used as on a computer, and nobody is locked out).
+      if (needsSecondStep && channel === "phone" && isEmailCodeLoginAvailable()) {
+        const sent = await issueEmailCode({ id: user.id, email: user.email, language: toLanguage(user.language) });
+        if (sent.outcome === "limit") return reply.code(429).send({ error: "Too many attempts. Try again later." });
+        if (sent.outcome === "sent" || sent.outcome === "recent") {
+          return {
+            mfaRequired: true,
+            method: "email",
+            mfaToken: signMfaToken({ userId: user.id, purpose: "mfa-email", client }),
+            emailHint: maskEmail(user.email),
+            // An account that also has the authenticator can use it instead.
+            ...(user.totpEnabledAt ? { alternativeMfaToken: signMfaToken({ userId: user.id, purpose: "mfa", client }) } : {}),
+          };
+        }
+        // The email could not be sent: with an authenticator the person can still get in; without one there is nothing to fall back on.
+        if (!user.totpEnabledAt) return reply.code(503).send({ error: "Could not send the email" });
+      }
       // The password was right, but that isn't enough: an account with an authenticator is asked for its code, and an admin that
       // has none yet must set one up before it gets in. Until then the only thing handed out is a short note saying so.
       if (user.totpEnabledAt) {
@@ -150,6 +175,47 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       }
       const status = await getMfaStatus(user);
       return reply.send({ ...(await openSession(app, request, user, claims.client, true)), usedRecoveryCode: used === "recovery", recoveryCodesLeft: status.recoveryCodesLeft });
+    },
+  );
+
+  // --- Second step by email (phone sign-ins)
+  app.post(
+    "/auth/login/email",
+    { schema: { tags: ["Auth"], summary: "Segundo paso en el celular: el código de 6 dígitos enviado por correo", body: zodToJsonSchema(emailLoginSchema) } },
+    async (request, reply) => {
+      const parsed = emailLoginSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      const claims = verifyMfaToken(parsed.data.mfaToken, "mfa-email");
+      if (!claims) return reply.code(401).send({ error: "Sign-in expired, start again" });
+      if (await rateLimitSecondFactor(request, reply, claims.userId)) return;
+
+      const user = await findUserById(claims.userId);
+      if (!user || !(await verifyEmailCode(user.id, parsed.data.code))) {
+        if (user) await recordLoginFailure(user.email).catch(() => undefined);
+        return reply.code(401).send({ error: "Invalid code" });
+      }
+      return reply.send(await openSession(app, request, user, claims.client, true));
+    },
+  );
+
+  app.post(
+    "/auth/login/email/resend",
+    { schema: { tags: ["Auth"], summary: "Enviar de nuevo el código por correo", body: zodToJsonSchema(emailResendSchema) } },
+    async (request, reply) => {
+      const parsed = emailResendSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      const claims = verifyMfaToken(parsed.data.mfaToken, "mfa-email");
+      if (!claims) return reply.code(401).send({ error: "Sign-in expired, start again" });
+      const user = await findUserById(claims.userId);
+      if (!user) return reply.code(401).send({ error: "Sign-in expired, start again" });
+      const sent = await issueEmailCode({ id: user.id, email: user.email, language: toLanguage(user.language) });
+      if (sent.outcome === "recent") {
+        void reply.header("Retry-After", sent.retryAfterSec);
+        return reply.code(429).send({ error: "Too many attempts. Try again later.", retryAfterSeconds: sent.retryAfterSec });
+      }
+      if (sent.outcome === "limit") return reply.code(429).send({ error: "Too many attempts. Try again later." });
+      if (sent.outcome === "failed") return reply.code(503).send({ error: "Could not send the email" });
+      return reply.code(204).send();
     },
   );
 
@@ -200,8 +266,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
 
       // What the account is NOW is what the new token says (a role changed, an organization moved), not what it was at sign-in.
       const user = await findUserById(result.session.userId);
-      if (!user || (isTotpRequired(user.role) && !user.totpEnabledAt)) {
-        // An account that became an admin since it signed in has to come back through the login to set up its authenticator.
+      if (!user || (isTotpRequired(user.role) && !result.session.mfa)) {
+        // An account that became an admin since it signed in (so its session never passed a second step) has to come back through the login.
         await revokeSessionsById([result.session.id]);
         return reply.code(401).send({ error: "Session expired" });
       }
