@@ -79,7 +79,7 @@ export interface OrganizationDetail extends OrganizationSummary {
   sections: string[] | null;
   /** The company logo (data URL), shown in its top bar unless a user has a photo of their own. */
   logo: string | null;
-  members: Array<{ id: string; name: string; email: string; role: string; allowedArea: string | null; logo: string | null }>;
+  members: Array<{ id: string; name: string; email: string; role: string; allowedArea: string | null; logo: string | null; totpEnabled: boolean }>;
   deviceList: Array<{
     id: string;
     imei: string;
@@ -96,7 +96,7 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
   const summary = (await listOrganizations()).find((row) => row.id === id);
   if (!summary) return undefined;
   const members = await db
-    .select({ id: users.id, name: users.name, email: users.email, role: users.role, allowedArea: users.allowedArea, logo: users.logo })
+    .select({ id: users.id, name: users.name, email: users.email, role: users.role, allowedArea: users.allowedArea, logo: users.logo, totpEnabledAt: users.totpEnabledAt })
     .from(users)
     .where(eq(users.orgId, id))
     .orderBy(asc(users.createdAt));
@@ -118,7 +118,13 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
     ...device,
     vehicle: vehicleName ? { name: vehicleName, plate: vehiclePlate } : null,
   }));
-  return { ...summary, sections: org.modules ?? null, logo: org.logo ?? null, members, deviceList };
+  return {
+    ...summary,
+    sections: org.modules ?? null,
+    logo: org.logo ?? null,
+    members: members.map(({ totpEnabledAt, ...member }) => ({ ...member, totpEnabled: !!totpEnabledAt })),
+    deviceList,
+  };
 }
 
 /** A new client: its organization with its first user (the owner), same as the public sign-up but done by OneSystec. */

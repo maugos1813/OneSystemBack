@@ -5,6 +5,8 @@ import { EventEmitter } from "node:events";
 import { db } from "../db/client.js";
 import type { Position } from "../db/schema/index.js";
 import { vehicles } from "../db/schema/index.js";
+import { isHonouredLoginToken } from "../api/middlewares/auth.middleware.js";
+import type { JwtPayload } from "../api/types.js";
 import { isPlatformUser } from "../services/platform.service.js";
 
 /**
@@ -41,9 +43,12 @@ export async function registerRealtimeGateway(app: FastifyInstance): Promise<voi
     let allowedArea: string | null | undefined;
     let userId: string;
     let viewOnly = false;
+    let tokenExpiresAt = 0;
     try {
       if (!token) throw new Error("missing token");
-      const payload = app.jwt.verify<{ userId: string; orgId: string; allowedArea?: string | null; viewAs?: boolean }>(token);
+      const payload = app.jwt.verify<{ userId: string; orgId: string; allowedArea?: string | null; viewAs?: boolean; sid?: string; exp?: number }>(token);
+      if (!isHonouredLoginToken(payload as JwtPayload)) throw new Error("token no longer honoured");
+      tokenExpiresAt = payload.exp! * 1000;
       orgId = payload.orgId;
       allowedArea = payload.allowedArea;
       userId = payload.userId;
@@ -52,6 +57,11 @@ export async function registerRealtimeGateway(app: FastifyInstance): Promise<voi
       socket.close(4001, "Unauthorized");
       return;
     }
+
+    // A connection is checked once, when it opens, so it is closed when the token it opened with runs out: the app renews its
+    // login and reconnects, and a session that was ended can't keep listening for ever.
+    const expiry = setTimeout(() => socket.close(4001, "Token expired"), Math.max(0, Math.min(tokenExpiresAt - Date.now(), 2 ** 31 - 1)));
+    socket.on("close", () => clearTimeout(expiry));
 
     // OneSystec's own map: every device of every client. Only its people, and never through a "viewing a client" token.
     if (scope === "all") {

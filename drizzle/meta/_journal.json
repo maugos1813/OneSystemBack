@@ -288,6 +288,13 @@
       "when": 1794073993972,
       "tag": "0040_gifted_sinister_six",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794176864997,
+      "tag": "0041_auth_sessions_totp",
+      "breakpoints": true
     }
   ]
 }

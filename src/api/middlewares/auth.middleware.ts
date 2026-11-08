@@ -2,6 +2,8 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { isPlatformUser } from "../../services/platform.service.js";
 import { authenticateApiKey, looksLikeApiKey } from "../../services/apiKey.service.js";
 import type { ModuleKey } from "../../services/modules.js";
+import { isSessionRevoked } from "../../services/userSession.service.js";
+import type { JwtPayload } from "../types.js";
 import { getUserModules } from "../../services/userModules.service.js";
 
 // Vehicle-data reads that existing integrations already call with an API key before /v1
@@ -42,6 +44,17 @@ export async function rejectViewOnlyWrites(request: FastifyRequest, reply: Fasti
   }
 }
 
+/**
+ * Whether a login token that passed the signature check is still honoured. Every token now expires (a few minutes, renewed by the
+ * session behind it): the ones issued before that, which never did, are refused so that nobody stays signed in for ever on an old
+ * copy. And a token whose session was ended (sign out, "sign out everywhere", a password change) stops working at once.
+ */
+export function isHonouredLoginToken(payload: JwtPayload): boolean {
+  if (typeof payload.exp !== "number") return false;
+  if (payload.sid && isSessionRevoked(payload.sid)) return false;
+  return true;
+}
+
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const authHeader = request.headers.authorization;
   const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined;
@@ -66,6 +79,10 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   try {
     await request.jwtVerify();
   } catch {
+    await reply.code(401).send({ error: "Unauthorized" });
+    return;
+  }
+  if (!isHonouredLoginToken(request.user)) {
     await reply.code(401).send({ error: "Unauthorized" });
     return;
   }

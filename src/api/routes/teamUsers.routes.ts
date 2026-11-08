@@ -22,6 +22,8 @@ import { LANGUAGES, toLanguage } from "../../services/i18n.js";
 import { MODULE_KEYS } from "../../services/modules.js";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { getUserModules } from "../../services/userModules.service.js";
+import { disableTotp } from "../../services/mfa.service.js";
+import { revokeAllUserSessions } from "../../services/userSession.service.js";
 import { isUniqueViolation } from "../pgError.js";
 import { requireAuth, requireRole } from "../middlewares/auth.middleware.js";
 
@@ -390,6 +392,33 @@ export async function teamUsersRoutes(app: FastifyInstance): Promise<void> {
 
       const ok = await updateTeamMemberPassword(request.user.orgId, id, parsed.data.password);
       if (!ok) return reply.code(404).send({ error: "User not found" });
+      // A new password is the usual answer to "someone else may have it": every other device is signed out (the one that
+      // changed it stays, when it is the person themselves).
+      await revokeAllUserSessions(id, isSelf ? request.user.sid : undefined);
+      return reply.code(204).send();
+    },
+  );
+
+  // A lost phone: whoever manages this member removes their authenticator, and it is set up again at their next sign-in (an
+  // admin is made to). Only the owner may do it to an admin, and nobody to the owner (OneSystec does that one).
+  app.post(
+    "/users/:id/totp/reset",
+    {
+      preHandler: MANAGE_MEMBERS,
+      schema: { tags: ["Team"], summary: "Quitar el autenticador de un miembro (teléfono perdido)", security: AUTH },
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const target = await getTeamMember(request.user.orgId, id);
+      if (!target) return reply.code(404).send({ error: "User not found" });
+      if (id === request.user.userId || !canManageOther(request.user, target)) {
+        return reply.code(403).send({ error: "Forbidden" });
+      }
+      if (target.role === "admin" && request.user.role !== "owner") {
+        return reply.code(403).send({ error: "Solo el titular de la cuenta puede restablecer el autenticador de un administrador" });
+      }
+      await disableTotp(id);
+      await revokeAllUserSessions(id);
       return reply.code(204).send();
     },
   );

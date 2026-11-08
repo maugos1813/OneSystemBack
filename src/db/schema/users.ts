@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { pgEnum, pgTable, text, timestamp, uuid, varchar, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { integer, pgEnum, pgTable, text, timestamp, uuid, varchar, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations.js";
 
 // "manager": a delegated sub-admin — can invite/edit/remove only the sub-users it
@@ -31,6 +31,12 @@ export const users = pgTable("users", {
   modules: text("modules").array(),
   /** The language this person sees the app, the alerts and the emails in (see services/i18n.ts). Chosen by an admin. */
   language: varchar("language", { length: 5 }).notNull().default("es"),
+  /** The authenticator secret, encrypted (see secretBox.ts). Set when setup starts; it only counts once `totpEnabledAt` is set. */
+  totpSecretEnc: text("totp_secret_enc"),
+  /** When the user confirmed the authenticator with a first code. Null: the second step is off for this account. */
+  totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),
+  /** The last 30-second step accepted, so the same code can't be used twice. */
+  totpLastStep: integer("totp_last_step"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

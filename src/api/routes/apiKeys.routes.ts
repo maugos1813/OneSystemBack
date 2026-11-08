@@ -4,7 +4,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ApiKey } from "../../db/schema/index.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../../services/apiKey.service.js";
 import { fleetGroupExists } from "../../services/vehicle.service.js";
-import { rejectViewOnlyWrites, requireRole } from "../middlewares/auth.middleware.js";
+import { isHonouredLoginToken, rejectViewOnlyWrites, requireRole } from "../middlewares/auth.middleware.js";
 
 const createSchema = z.object({
   name: z.string().min(2).max(100),
@@ -32,6 +32,10 @@ async function requireUserAuth(request: FastifyRequest, reply: FastifyReply): Pr
   try {
     await request.jwtVerify();
   } catch {
+    await reply.code(401).send({ error: "Unauthorized" });
+    return;
+  }
+  if (!isHonouredLoginToken(request.user)) {
     await reply.code(401).send({ error: "Unauthorized" });
     return;
   }

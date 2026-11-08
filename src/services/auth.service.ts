@@ -100,3 +100,14 @@ export async function authenticate(email: string, password: string): Promise<Use
   const valid = await verifyPassword(user.passwordHash, password);
   return valid ? user : null;
 }
+
+export async function findUserById(userId: string): Promise<User | undefined> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return user;
+}
+
+/** Whether this is the password of that user (asked again before something sensitive, like turning the authenticator off). */
+export async function verifyUserPassword(userId: string, password: string): Promise<boolean> {
+  const user = await findUserById(userId);
+  return !!user && verifyPassword(user.passwordHash, password);
+}

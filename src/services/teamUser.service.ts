@@ -19,6 +19,8 @@ export interface TeamMember {
   modules: ModuleKey[];
   /** The language this member sees the app, the alerts and the emails in. */
   language: Language;
+  /** Signs in with an authenticator app (a code after the password). */
+  totpEnabled: boolean;
   createdAt: Date;
   /** Only meaningful for role "viewer"/"manager" — owner/admin always see every product the org has. */
   productKeys: string[];
@@ -51,6 +53,7 @@ function toTeamMember(member: User, productKeys: string[]): TeamMember {
     logo: member.logo,
     modules: resolveModules(member.role, member.modules),
     language: toLanguage(member.language),
+    totpEnabled: !!member.totpEnabledAt,
     createdAt: member.createdAt,
     productKeys,
   };

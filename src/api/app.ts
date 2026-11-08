@@ -6,6 +6,7 @@ import Fastify from "fastify";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import "./types.js";
+import { ACCESS_TOKEN_TTL } from "../services/userSession.service.js";
 import { registerRealtimeGateway } from "../realtime/gateway.js";
 import { apiKeysRoutes } from "./routes/apiKeys.routes.js";
 import { authRoutes } from "./routes/auth.routes.js";
@@ -49,7 +50,7 @@ const app = Fastify({ loggerInstance: logger });
   // odometer calibration is a PUT and "Failed to fetch" was all the browser said.
   await app.register(cors, { origin: corsOrigins, methods: ["GET", "POST", "PUT", "PATCH", "DELETE"] });
 
-  await app.register(jwt, { secret: env.JWT_SECRET });
+  await app.register(jwt, { secret: env.JWT_SECRET, sign: { expiresIn: ACCESS_TOKEN_TTL } });
 
   await app.register(swagger, {
     // The public /v1 API has its own document (/v1/docs); /docs is the app's internal API.

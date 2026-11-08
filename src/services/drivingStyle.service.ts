@@ -285,12 +285,6 @@ function pairsCte(segments: readonly Segment[]) {
     )`;
 }
 
-const idList = (ids: string[]) =>
-  sql.join(
-    ids.map((id) => sql`${id}::uuid`),
-    sql`, `,
-  );
-
 const isBraking = sql`dt > 0 and dt <= ${MAX_DENSE_GAP_S} and p_speed - speed >= ${MIN_SPEED_CHANGE_KMH}
   and (p_speed - speed) / 3.6 / dt >= ${HARSH_BRAKING_MS2}`;
 const isAcceleration = sql`dt > 0 and dt <= ${MAX_DENSE_GAP_S} and speed - p_speed >= ${MIN_SPEED_CHANGE_KMH}

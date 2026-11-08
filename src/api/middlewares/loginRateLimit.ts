@@ -50,3 +50,26 @@ export async function rateLimitLogin(request: FastifyRequest, reply: FastifyRepl
     await refuse(reply, Math.max(...blocked.map((r) => r.retryAfterSec)));
   }
 }
+
+/**
+ * Brake on guessing the second step. Six digits are a million possibilities: ten tries per account every 15 minutes (whoever is
+ * trying and from where) make guessing hopeless, and a stray run of typos by the real person only costs a short wait.
+ */
+export const SECOND_FACTOR_LIMITS = { perUser: 10, perAddress: 40 } as const;
+let secondFactorByUser = new FixedWindowLimiter(SECOND_FACTOR_LIMITS.perUser, WINDOW_MS);
+let secondFactorByAddress = new FixedWindowLimiter(SECOND_FACTOR_LIMITS.perAddress, WINDOW_MS);
+
+export function resetSecondFactorLimits(): void {
+  secondFactorByUser = new FixedWindowLimiter(SECOND_FACTOR_LIMITS.perUser, WINDOW_MS);
+  secondFactorByAddress = new FixedWindowLimiter(SECOND_FACTOR_LIMITS.perAddress, WINDOW_MS);
+}
+
+/** Counts one attempt; when over the limit it answers 429 and returns true (the caller stops there). */
+export async function rateLimitSecondFactor(request: FastifyRequest, reply: FastifyReply, userId: string): Promise<boolean> {
+  const results = [secondFactorByUser.hit(userId), secondFactorByAddress.hit(clientAddress(request))];
+  const blocked = results.filter((r) => !r.allowed);
+  if (blocked.length === 0) return false;
+  request.log.warn({ userId }, "Second-step attempts blocked: too many");
+  await refuse(reply, Math.max(...blocked.map((r) => r.retryAfterSec)));
+  return true;
+}

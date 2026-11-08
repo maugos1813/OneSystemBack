@@ -1,7 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { findUserById } from "../../services/auth.service.js";
+import { disableTotp } from "../../services/mfa.service.js";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
+import { revokeAllUserSessions } from "../../services/userSession.service.js";
 import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
 import { isUniqueViolation } from "../pgError.js";
@@ -118,6 +121,24 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
       const updated = await setUserLogo(id.data, body.data.logo, body.data.logo === null ? null : (body.data.tag ?? null));
       if (!updated) return reply.code(404).send({ error: "User not found" });
       return updated;
+    },
+  );
+
+  // A person who lost their phone (and their recovery codes): OneSystec removes the authenticator and signs them out everywhere;
+  // at the next sign-in they set a new one up (an owner or admin is made to).
+  app.post<{ Params: { userId: string } }>(
+    "/platform/users/:userId/totp/reset",
+    {
+      ...PLATFORM,
+      schema: { tags: ["Platform"], summary: "Quitar el autenticador de un usuario de un cliente (solo OneSystec)", security: AUTH },
+    },
+    async (request, reply) => {
+      const id = z.string().uuid().safeParse(request.params.userId);
+      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
+      if (!(await findUserById(id.data))) return reply.code(404).send({ error: "User not found" });
+      await disableTotp(id.data);
+      await revokeAllUserSessions(id.data);
+      return reply.code(204).send();
     },
   );
 

@@ -8,6 +8,16 @@ const envSchema = z.object({
   HTTP_HOST: z.string().default("0.0.0.0"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   JWT_SECRET: z.string().min(1, "JWT_SECRET is required"),
+  // Key that encrypts the authenticator (TOTP) secrets in the database. Left unset, one is derived from JWT_SECRET, and then
+  // rotating JWT_SECRET would make those secrets unreadable: set this (16+ random characters) before you ever need to rotate.
+  // Secrets stored earlier keep working after it is set: each one says which key made it.
+  TOTP_ENCRYPTION_KEY: z.string().min(16).optional(),
+  // "false" lifts the rule that owners and admins must use an authenticator app to sign in (an emergency switch, e.g. if
+  // the email/phone side is down). On by default.
+  ADMIN_TOTP_REQUIRED: z
+    .string()
+    .optional()
+    .transform((value) => value?.trim().toLowerCase() !== "false"),
   // Comma-separated list of origins allowed to call the API from a browser (the frontend's URL(s)).
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   // Public base URL of this API, shown as the server in the OpenAPI docs (/docs).

@@ -1,6 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), registerOrganizationWithOwner: vi.fn() }));
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), registerOrganizationWithOwner: vi.fn(), createSession: vi.fn() }));
+// The sign-in is what is under test here, not where the session is stored.
+vi.mock("../../src/services/userSession.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/userSession.service.js")>()),
+  createSession: mocks.createSession,
+}));
 vi.mock("../../src/services/auth.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/auth.service.js")>()),
   ...mocks,
@@ -20,6 +25,7 @@ describe("login and registration limits", () => {
   beforeEach(() => {
     resetLoginLimits();
     mocks.authenticate.mockReset().mockResolvedValue(null);
+    mocks.createSession.mockReset().mockResolvedValue({ session: { id: "123e4567-e89b-12d3-a456-426614174000" }, refreshToken: "123e4567-e89b-12d3-a456-426614174000.secret" });
     mocks.registerOrganizationWithOwner.mockReset().mockResolvedValue({ orgId: "org-1", user: { id: "u1", role: "owner", allowedArea: null } });
   });
 
@@ -51,10 +57,11 @@ describe("login and registration limits", () => {
   });
 
   it("still lets a right password in", async () => {
-    mocks.authenticate.mockResolvedValue({ id: "u1", orgId: "org-1", role: "owner", allowedArea: null });
+    mocks.authenticate.mockResolvedValue({ id: "u1", orgId: "org-1", role: "viewer", allowedArea: null, totpEnabledAt: null });
     const res = await login("a@x.com");
     expect(res.statusCode).toBe(200);
     expect(res.json()).toHaveProperty("token");
+    expect(res.json()).toHaveProperty("refreshToken");
   });
 
   it("tells clients apart by the address Railway's edge reports in X-Real-IP, not by the edge's own address", async () => {

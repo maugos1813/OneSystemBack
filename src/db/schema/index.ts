@@ -21,3 +21,4 @@ export * from "./driverDirectory.js";
 export * from "./platformAlerts.js";
 export * from "./fleets.js";
 export * from "./vehicleDeviceAssignments.js";
+export * from "./userSessions.js";
