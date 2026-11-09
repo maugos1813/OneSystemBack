@@ -4,7 +4,7 @@ import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
 import { pushTokens } from "../db/schema/index.js";
-import type { Language } from "./i18n.js";
+import { DEFAULT_LANGUAGE, type Language } from "./i18n.js";
 
 export interface PushMessage {
   title: string;
@@ -126,7 +126,7 @@ export async function removeToken(userId: string, token: string): Promise<void> 
 }
 
 /** The text of the notification for a run's new alerts: how many, and the first few. */
-export function alertPushMessage(orgName: string, messages: readonly string[], language: Language = "es"): PushMessage {
+export function alertPushMessage(orgName: string, messages: readonly string[], language: Language = DEFAULT_LANGUAGE): PushMessage {
   const shown = messages.slice(0, 3).join("\n");
   const rest = messages.length - 3;
   const it = language === "it";
@@ -141,7 +141,7 @@ export function alertPushMessage(orgName: string, messages: readonly string[], l
 }
 
 /** The urgent notice for a GPS that is disconnected: the same text again each reminder, so it must be unmistakable. */
-export function urgentPushMessage(orgName: string, messages: readonly string[], language: Language = "es", reminder = false): PushMessage {
+export function urgentPushMessage(orgName: string, messages: readonly string[], language: Language = DEFAULT_LANGUAGE, reminder = false): PushMessage {
   const shown = messages.slice(0, 4).join("\n");
   const rest = messages.length - 4;
   const it = language === "it";

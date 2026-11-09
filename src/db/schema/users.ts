@@ -30,7 +30,7 @@ export const users = pgTable("users", {
    * default package. Ignored for owner/admin, who always have everything. */
   modules: text("modules").array(),
   /** The language this person sees the app, the alerts and the emails in (see services/i18n.ts). Chosen by an admin. */
-  language: varchar("language", { length: 5 }).notNull().default("es"),
+  language: varchar("language", { length: 5 }).notNull().default("it"),
   /** The authenticator secret, encrypted (see secretBox.ts). Set when setup starts; it only counts once `totpEnabledAt` is set. */
   totpSecretEnc: text("totp_secret_enc"),
   /** When the user confirmed the authenticator with a first code. Null: the second step is off for this account. */

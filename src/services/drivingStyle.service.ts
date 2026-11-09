@@ -581,6 +581,11 @@ export interface DrivingIncident {
   lng: number;
   /** Human-readable specifics, as shown in the app. */
   detail: string;
+  /** The numbers behind `detail`, so a client can word it in its own language. */
+  speed: number;
+  fromSpeed: number | null;
+  angleDelta: number | null;
+  speedLimit: number;
 }
 
 const MAX_INCIDENTS = 500;
@@ -640,7 +645,18 @@ export async function getVehicleIncidents(
           : r.type === "speeding"
             ? `${Math.round(r.speed)} km/h (límite ${speedLimitKmh})`
             : `${Math.round(r.from_speed ?? 0)} → ${Math.round(r.speed)} km/h`;
-      return { type: r.type, ts: new Date(r.ts), lat: r.lat, lng: r.lng, detail };
+      // `detail` stays for old readers; the app builds its own sentence, in the person's language, from the numbers.
+      return {
+        type: r.type,
+        ts: new Date(r.ts),
+        lat: r.lat,
+        lng: r.lng,
+        detail,
+        speed: Math.round(r.speed),
+        fromSpeed: r.from_speed === null || r.from_speed === undefined ? null : Math.round(r.from_speed),
+        angleDelta: r.angle_delta === null || r.angle_delta === undefined ? null : Math.round(r.angle_delta),
+        speedLimit: speedLimitKmh,
+      };
     })
     .reverse();
 }

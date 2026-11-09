@@ -1,5 +1,5 @@
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
-import type { Language } from "./i18n.js";
+import { DEFAULT_LANGUAGE, type Language } from "./i18n.js";
 
 /**
  * The alarms a Teltonika tracker raises on its own (it decides, from its accelerometer,
@@ -11,25 +11,25 @@ export const DEVICE_ALARMS = {
   unplug: {
     avlId: AVL_ID.UNPLUG,
     eventType: "unplug_change",
-    alert: (vehicle: string, language: Language = "es") =>
+    alert: (vehicle: string, language: Language = DEFAULT_LANGUAGE) =>
       language === "it" ? `${vehicle}: il dispositivo è stato scollegato dal veicolo (possibile manomissione)` : `${vehicle}: se desconectó el dispositivo del vehículo (posible manipulación)`,
   },
   jamming: {
     avlId: AVL_ID.JAMMING,
     eventType: "jamming_change",
-    alert: (vehicle: string, language: Language = "es") =>
+    alert: (vehicle: string, language: Language = DEFAULT_LANGUAGE) =>
       language === "it" ? `${vehicle}: rilevata interferenza del segnale (jamming)` : `${vehicle}: se detectó interferencia de señal (jamming)`,
   },
   towing: {
     avlId: AVL_ID.TOWING,
     eventType: "towing_change",
-    alert: (vehicle: string, language: Language = "es") =>
+    alert: (vehicle: string, language: Language = DEFAULT_LANGUAGE) =>
       language === "it" ? `${vehicle}: rilevato un possibile traino` : `${vehicle}: se detectó un posible remolque`,
   },
   crash: {
     avlId: AVL_ID.CRASH,
     eventType: "crash_change",
-    alert: (vehicle: string, language: Language = "es") =>
+    alert: (vehicle: string, language: Language = DEFAULT_LANGUAGE) =>
       language === "it" ? `${vehicle}: rilevato un possibile incidente o urto` : `${vehicle}: se detectó un posible choque o impacto`,
   },
 } as const;
@@ -84,7 +84,7 @@ function duration(minutes: number): string {
   return hours > 0 ? `${hours} h ${rest} min` : `${rest} min`;
 }
 
-export function trackingGapMessage(vehicle: string, payload: unknown, language: Language = "es"): string {
+export function trackingGapMessage(vehicle: string, payload: unknown, language: Language = DEFAULT_LANGUAGE): string {
   const { minutes = 0 } = (payload ?? {}) as { minutes?: number };
   return language === "it"
     ? `${vehicle}: il dispositivo è rimasto ${duration(minutes)} senza registrare (spento o scollegato). Il percorso di quel periodo non è stato registrato.`

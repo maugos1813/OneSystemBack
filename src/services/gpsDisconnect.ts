@@ -1,5 +1,5 @@
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
-import type { Language } from "./i18n.js";
+import { DEFAULT_LANGUAGE, type Language } from "./i18n.js";
 
 /**
  * "The GPS is disconnected", told from what the tracker last reported. Two ways it shows, each with its own alert:
@@ -40,13 +40,13 @@ export function isReminderDue(episode: { firstTriggeredAt: Date; lastNotifiedAt:
   return now.getTime() - episode.lastNotifiedAt.getTime() >= everyMs - REMINDER_SLACK_MS;
 }
 
-export function gpsNoPowerMessage(vehicle: string, language: Language = "es"): string {
+export function gpsNoPowerMessage(vehicle: string, language: Language = DEFAULT_LANGUAGE): string {
   return language === "it"
     ? `${vehicle}: il GPS non riceve corrente mentre il veicolo è in movimento (scollegato o cavo tagliato)`
     : `${vehicle}: el GPS no recibe corriente con el vehículo en marcha (desconectado o cable cortado)`;
 }
 
-export function gpsSilentMessage(vehicle: string, minutes: number, language: Language = "es"): string {
+export function gpsSilentMessage(vehicle: string, minutes: number, language: Language = DEFAULT_LANGUAGE): string {
   return language === "it"
     ? `${vehicle}: il GPS non invia dati da ${minutes} min e il veicolo era in movimento (spento o scollegato)`
     : `${vehicle}: el GPS lleva ${minutes} min sin enviar datos y el vehículo iba en marcha (apagado o desconectado)`;

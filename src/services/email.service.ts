@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
-import { pick, type Language, type Localized } from "./i18n.js";
+import { DEFAULT_LANGUAGE, pick, type Language, type Localized } from "./i18n.js";
 
 const resend = env.RESEND_API_KEY ? new Resend(env.RESEND_API_KEY) : null;
 
@@ -96,7 +96,7 @@ function escapeHtml(s: string): string {
 /** No-op (logged) if RESEND_API_KEY isn't set — lets the evaluator run in local dev
  * without an email account, and never throws (a delivery failure shouldn't crash the
  * scheduler loop for every other organization). */
-export async function sendAlertDigest(to: string, orgName: string, alerts: AlertEmailItem[], language: Language = "es"): Promise<void> {
+export async function sendAlertDigest(to: string, orgName: string, alerts: AlertEmailItem[], language: Language = DEFAULT_LANGUAGE): Promise<void> {
   if (alerts.length === 0) return;
 
   if (!resend) {
@@ -139,7 +139,7 @@ export function canEmailLoginCodes(): boolean {
 }
 
 /** The 6-digit sign-in code, by email. True only if the provider accepted the message (Resend reports its refusals instead of throwing). */
-export async function sendLoginCodeEmail(to: string, code: string, language: Language = "es"): Promise<boolean> {
+export async function sendLoginCodeEmail(to: string, code: string, language: Language = DEFAULT_LANGUAGE): Promise<boolean> {
   if (!resend || !env.AUTH_EMAIL_FROM) return false;
   const copy = pick(language, LOGIN_CODE_COPY);
   try {

@@ -106,7 +106,7 @@ export async function geocode(
   url.searchParams.set("q", query);
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("limit", "1");
-  url.searchParams.set("accept-language", "es");
+  url.searchParams.set("accept-language", "it");
   url.searchParams.set("addressdetails", "1");
   // left, top, right, bottom; not bounded: it only ranks nearer results first.
   url.searchParams.set(

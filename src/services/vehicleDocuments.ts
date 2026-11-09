@@ -1,4 +1,4 @@
-import { pick, type Language } from "./i18n.js";
+import { DEFAULT_LANGUAGE, pick, type Language } from "./i18n.js";
 
 export const DOCUMENT_KINDS = ["seguro", "revision", "bollo", "tacografo", "otro"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
@@ -44,13 +44,13 @@ export function documentStatus(expiresOn: string, remindDays: number, today: Dat
   return { state: "ok", daysLeft };
 }
 
-export function documentName(kind: string, label: string | null, language: Language = "es"): string {
+export function documentName(kind: string, label: string | null, language: Language = DEFAULT_LANGUAGE): string {
   const labels = pick(language, { es: DOCUMENT_LABELS, it: DOCUMENT_LABELS_IT });
   if (kind === "otro") return label?.trim() || labels.otro;
   return labels[kind as DocumentKind] ?? kind;
 }
 
-export function documentAlertMessage(vehicleName: string, name: string, status: DocumentStatus, language: Language = "es"): string {
+export function documentAlertMessage(vehicleName: string, name: string, status: DocumentStatus, language: Language = DEFAULT_LANGUAGE): string {
   if (language === "it") {
     const days = Math.abs(status.daysLeft);
     // "scadenza" (the date) instead of "scaduto/a": the name of the document can be masculine or feminine.

@@ -29,7 +29,7 @@ beforeAll(async () => {
     CREATE TABLE users (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL DEFAULT '',
       email varchar(255) NOT NULL UNIQUE, password_hash varchar(255) NOT NULL, role user_role NOT NULL DEFAULT 'viewer',
-      parent_user_id uuid, allowed_area varchar(50), logo text, modules text[], language varchar(5) NOT NULL DEFAULT 'es', totp_secret_enc text, totp_enabled_at timestamptz, totp_last_step integer, created_at timestamptz NOT NULL DEFAULT now()
+      parent_user_id uuid, allowed_area varchar(50), logo text, modules text[], language varchar(5) NOT NULL DEFAULT 'it', totp_secret_enc text, totp_enabled_at timestamptz, totp_last_step integer, created_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE user_products (user_id uuid NOT NULL, product_key varchar(50) NOT NULL);
     CREATE TABLE organization_products (org_id uuid NOT NULL, product_key varchar(50) NOT NULL);
@@ -142,14 +142,17 @@ describe("the sections of a user", () => {
 });
 
 describe("the language of a user", () => {
-  it("is Spanish unless the admin chooses, and shows in /me and in the team list", async () => {
+  it("is Italian unless the admin chooses, and shows in /me and in the team list", async () => {
     const { orgId, user } = await registerOrganizationWithOwner({ orgName: "Gamonal Lang", email: "ol@gamonal.it", password: "supersecret1" });
-    const spanish = await createTeamMember({ orgId, name: "S", email: "s@c.it", password: "supersecret1", role: "viewer", productKeys: [] });
+    const byDefault = await createTeamMember({ orgId, name: "S", email: "s@c.it", password: "supersecret1", role: "viewer", productKeys: [] });
     const italian = await createTeamMember({ orgId, name: "Piazza", email: "p@c.it", password: "supersecret1", role: "viewer", language: "it", productKeys: [] });
+    const spanish = await createTeamMember({ orgId, name: "Mau", email: "m@c.it", password: "supersecret1", role: "viewer", language: "es", productKeys: [] });
+    expect(byDefault.language).toBe("it");
     expect(spanish.language).toBe("es");
     expect(italian.language).toBe("it");
+    expect((await getCurrentUser(spanish.id))?.language).toBe("es");
     expect((await getCurrentUser(italian.id))?.language).toBe("it");
-    expect((await getCurrentUser(user.id))?.language).toBe("es");
+    expect((await getCurrentUser(user.id))?.language).toBe("it");
     expect((await listTeamMembers(orgId, user.id, "owner")).find((m) => m.id === italian.id)?.language).toBe("it");
   });
 
@@ -163,9 +166,9 @@ describe("the language of a user", () => {
     expect((await getCurrentUser(client.id))?.language).toBe("it");
   });
 
-  it("falls back to Spanish for anything it does not know", () => {
-    expect(toLanguage("it")).toBe("it");
-    expect(toLanguage("fr")).toBe("es");
-    expect(toLanguage(null)).toBe("es");
+  it("falls back to Italian for anything it does not know", () => {
+    expect(toLanguage("es")).toBe("es");
+    expect(toLanguage("fr")).toBe("it");
+    expect(toLanguage(null)).toBe("it");
   });
 });

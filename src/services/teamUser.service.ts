@@ -2,7 +2,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { organizationProducts, userProducts, users, type User } from "../db/schema/index.js";
 import { hashPassword } from "./auth.service.js";
-import { toLanguage, type Language } from "./i18n.js";
+import { DEFAULT_LANGUAGE, toLanguage, type Language } from "./i18n.js";
 import { setFleetLogo } from "./fleet.service.js";
 import { DEFAULT_MODULES, resolveModules, sanitizeModules, type ModuleKey } from "./modules.js";
 
@@ -133,7 +133,7 @@ export async function createTeamMember(input: CreateTeamMemberInput): Promise<Te
         allowedArea: input.allowedArea ?? null,
         logo: input.logo ?? null,
         modules: sanitizeModules(input.modules ?? DEFAULT_MODULES),
-        language: input.language ?? "es",
+        language: input.language ?? DEFAULT_LANGUAGE,
       })
       .returning();
 

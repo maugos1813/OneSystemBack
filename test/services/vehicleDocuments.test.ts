@@ -68,11 +68,12 @@ describe("documentStatus", () => {
   });
 
   it("names a document and words its alert", () => {
-    expect(documentName("seguro", null)).toBe("Seguro");
-    expect(documentName("otro", "Licencia ZTL")).toBe("Licencia ZTL");
-    expect(documentAlertMessage("Furgone", "Seguro", { state: "soon", daysLeft: 5 })).toBe("Furgone: Seguro vence en 5 días");
-    expect(documentAlertMessage("Furgone", "Seguro", { state: "soon", daysLeft: 0 })).toBe("Furgone: Seguro vence hoy");
-    expect(documentAlertMessage("Furgone", "Seguro", { state: "overdue", daysLeft: -3 })).toBe("Furgone: Seguro vencido hace 3 días");
+    expect(documentName("seguro", null, "es")).toBe("Seguro");
+    expect(documentName("seguro", null)).toBe("Assicurazione");
+    expect(documentName("otro", "Licencia ZTL", "es")).toBe("Licencia ZTL");
+    expect(documentAlertMessage("Furgone", "Seguro", { state: "soon", daysLeft: 5 }, "es")).toBe("Furgone: Seguro vence en 5 días");
+    expect(documentAlertMessage("Furgone", "Seguro", { state: "soon", daysLeft: 0 }, "es")).toBe("Furgone: Seguro vence hoy");
+    expect(documentAlertMessage("Furgone", "Seguro", { state: "overdue", daysLeft: -3 }, "es")).toBe("Furgone: Seguro vencido hace 3 días");
     expect(documentAlertMessage("Furgone", "Assicurazione", { state: "soon", daysLeft: 5 }, "it")).toBe("Furgone: Assicurazione — scade tra 5 giorni");
     expect(documentAlertMessage("Furgone", "Assicurazione", { state: "soon", daysLeft: 1 }, "it")).toBe("Furgone: Assicurazione — scade tra 1 giorno");
     expect(documentAlertMessage("Furgone", "Assicurazione", { state: "soon", daysLeft: 0 }, "it")).toBe("Furgone: Assicurazione — scade oggi");
@@ -83,7 +84,7 @@ describe("documentStatus", () => {
 describe("the documents of a vehicle", () => {
   it("are created, listed with their status and edited", async () => {
     const created = await service.createDocument(ORG, "PIAZZA", PIAZZA_VEHICLE, { kind: "seguro", expiresOn: "2026-11-10" }, NOW);
-    expect(created).toMatchObject({ name: "Seguro", status: { state: "soon", daysLeft: 17 }, remindDays: 30 });
+    expect(created).toMatchObject({ name: "Assicurazione", status: { state: "soon", daysLeft: 17 }, remindDays: 30 });
 
     const [piazza] = await service.listVehicleDocuments(ORG, "PIAZZA", NOW);
     expect(piazza).toMatchObject({ name: "Furgone Piazza", plate: "PZ111AA" });

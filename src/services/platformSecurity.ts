@@ -1,3 +1,4 @@
+import { DEFAULT_LANGUAGE } from "./i18n.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 import { DEVICE_ALARM_KEYS, DEVICE_ALARMS, isAlarmActive, isTrackingGapActive, TRACKING_GAP_EVENT } from "./deviceAlarms.js";
 import { wasParkedWithEngineOff } from "./deviceSilence.js";
@@ -115,13 +116,13 @@ export function deviceFindings(ctx: DeviceContext): Finding[] {
   for (const key of DEVICE_ALARM_KEYS) {
     const alarm = DEVICE_ALARMS[key];
     const event = alarms.get(alarm.eventType);
-    if (event && isAlarmActive(event.payload, alarm.avlId, event.ts, now)) add(key, alarm.alert(subject, "es"));
+    if (event && isAlarmActive(event.payload, alarm.avlId, event.ts, now)) add(key, alarm.alert(subject, DEFAULT_LANGUAGE));
   }
 
   const reading = position ? { speed: position.speed, ioData: position.ioData } : undefined;
-  if (isRunningWithoutPower(reading)) add("gps_no_power", gpsNoPowerMessage(subject, "es"));
+  if (isRunningWithoutPower(reading)) add("gps_no_power", gpsNoPowerMessage(subject, DEFAULT_LANGUAGE));
   if (isSilentWhileMoving(reading, device.lastSeenAt, SILENCE_MINUTES * 60_000, now)) {
-    add("gps_silent", gpsSilentMessage(subject, Math.round(seenAgo / 60_000), "es"));
+    add("gps_silent", gpsSilentMessage(subject, Math.round(seenAgo / 60_000), DEFAULT_LANGUAGE));
   }
 
   if (seenAgo > DEVICE_SILENT_MIN_MS && seenAgo < DEVICE_SILENT_MAX_MS && !wasParkedWithEngineOff(reading)) {

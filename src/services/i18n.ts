@@ -1,8 +1,8 @@
-/** The languages a person can see the app, the alerts and the emails in. Spanish is the original and the default. */
+/** The languages a person can see the app, the alerts and the emails in. Italian is the default (the clients are Italian); Spanish stays available. */
 export const LANGUAGES = ["es", "it"] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-export const DEFAULT_LANGUAGE: Language = "es";
+export const DEFAULT_LANGUAGE: Language = "it";
 
 export function isLanguage(value: unknown): value is Language {
   return typeof value === "string" && (LANGUAGES as readonly string[]).includes(value);

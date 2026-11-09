@@ -138,10 +138,10 @@ describe("maintenanceAlertMessage", () => {
 
   it("says overdue or what is left", () => {
     const base = { dueKm: 95000, dueDate: null };
-    expect(maintenanceAlertMessage("VAN-1", "Aceite", { ...base, state: "overdue", kmRemaining: -10, daysRemaining: null, usedFraction: 1.1 })).toBe(
+    expect(maintenanceAlertMessage("VAN-1", "Aceite", { ...base, state: "overdue", kmRemaining: -10, daysRemaining: null, usedFraction: 1.1 }, "es")).toBe(
       "VAN-1: mantenimiento vencido — Aceite",
     );
-    const soon = maintenanceAlertMessage("VAN-1", "Aceite", { ...base, state: "soon", kmRemaining: 320, daysRemaining: 12, usedFraction: 0.9 });
+    const soon = maintenanceAlertMessage("VAN-1", "Aceite", { ...base, state: "soon", kmRemaining: 320, daysRemaining: 12, usedFraction: 0.9 }, "es");
     expect(soon).toContain("próximo — Aceite");
     expect(soon).toContain("320");
     expect(soon).toContain("12 días");

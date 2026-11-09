@@ -8,7 +8,7 @@ import {
   type MaintenanceRecord,
   type Vehicle,
 } from "../db/schema/index.js";
-import type { Language } from "./i18n.js";
+import { DEFAULT_LANGUAGE, type Language } from "./i18n.js";
 import { addDays, kmAfterDay, kmBetween, listDailyKm, romeDay, startOfRomeDay, type DailyKm } from "./dailyKm.service.js";
 import { resolveOdometer } from "./odometer.js";
 import { computePlanStatus, oemOdometerKm, type PlanStatus } from "./maintenanceStatus.js";
@@ -532,7 +532,7 @@ export async function listPlansForOrg(orgId: string): Promise<MaintenancePlan[]>
 }
 
 /** What a plan's alert says, given where it stands. */
-export function maintenanceAlertMessage(vehicleName: string, planName: string, status: PlanStatus, language: Language = "es"): string {
+export function maintenanceAlertMessage(vehicleName: string, planName: string, status: PlanStatus, language: Language = DEFAULT_LANGUAGE): string {
   const it = language === "it";
   if (status.state === "overdue") return `${vehicleName}: ${it ? "manutenzione scaduta" : "mantenimiento vencido"} — ${planName}`;
   const parts: string[] = [];
