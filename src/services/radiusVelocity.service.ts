@@ -3,6 +3,7 @@ import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
 import { deviceEvents, devices, positions, vehicles } from "../db/schema/index.js";
+import { invalidateDeviceFleets } from "../realtime/deviceFleet.js";
 import { publishPosition } from "../realtime/gateway.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 
@@ -124,6 +125,7 @@ async function syncVehicle(orgId: string, deviceId: string, plate: string, rvGro
     // sensible starting value — once the vehicle exists, the org can freely reassign it
     // (e.g. via PATCH /vehicles/:id) and this sync never overwrites that choice again.
     await db.insert(vehicles).values({ orgId, name: plate, plate, fleetGroup, deviceId });
+    invalidateDeviceFleets();
     return;
   }
   if (existing.plate !== plate) {

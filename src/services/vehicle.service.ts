@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { vehicles, type NewVehicle, type Vehicle } from "../db/schema/index.js";
+import { invalidateDeviceFleets } from "../realtime/deviceFleet.js";
 
 /** `allowedArea` is a hard restriction (from the caller's JWT), not an optional UI
  * filter — when set, every read below excludes vehicles outside that área entirely,
@@ -32,6 +33,7 @@ export async function getVehicleForOrg(
 
 export async function createVehicle(input: NewVehicle): Promise<Vehicle> {
   const [row] = await db.insert(vehicles).values(input).returning();
+  invalidateDeviceFleets();
   return row!;
 }
 
@@ -47,11 +49,14 @@ export async function updateVehicle(
     .set(patch)
     .where(and(eq(vehicles.id, vehicleId), eq(vehicles.orgId, orgId)))
     .returning();
+  // The live channel remembers which flota each device is in for a few seconds: a change here applies at once.
+  invalidateDeviceFleets();
   return row;
 }
 
 export async function deleteVehicle(orgId: string, vehicleId: string): Promise<boolean> {
   const result = await db.delete(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.orgId, orgId)));
+  invalidateDeviceFleets();
   return (result.rowCount ?? 0) > 0;
 }
 

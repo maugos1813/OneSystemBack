@@ -156,6 +156,72 @@ export async function getLatestPosition(deviceId: string): Promise<Position | un
   return { ...newest, lat: lastFix.lat, lng: lastFix.lng, altitude: lastFix.altitude, angle: lastFix.angle };
 }
 
+/**
+ * The last known position of many devices in ONE query (what the live map starts from), instead of one request per vehicle.
+ * Same answer as getLatestPosition for each: the newest report, and when that one has no fix the last report that had one
+ * (within the same look-back). A device with nothing to show is simply absent from the result.
+ */
+export async function getLatestPositionsForDevices(deviceIds: string[]): Promise<Map<string, Position>> {
+  const result = new Map<string, Position>();
+  const unique = [...new Set(deviceIds)];
+  if (unique.length === 0) return result;
+  const list = sql.join(
+    unique.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const lookbackDays = LAST_FIX_LOOKBACK_MS / 86_400_000;
+  // One index lookup per device inside a single statement: the newest report, plus (only if that one has no fix) the last one with a fix.
+  const rows = await db.execute<{
+    id: string;
+    device_id: string;
+    ts: Date | string;
+    lat: number;
+    lng: number;
+    altitude: number;
+    angle: number;
+    satellites: number | null;
+    speed: number;
+    priority: number;
+    io_data: Record<string, unknown>;
+    fix_lat: number | null;
+    fix_lng: number | null;
+    fix_altitude: number | null;
+    fix_angle: number | null;
+  }>(sql`
+    select n.id, n.device_id, n.ts, n.lat, n.lng, n.altitude, n.angle, n.satellites, n.speed, n.priority, n.io_data,
+           f.lat as fix_lat, f.lng as fix_lng, f.altitude as fix_altitude, f.angle as fix_angle
+    from unnest(array[${list}]) as d(id)
+    cross join lateral (select * from positions p where p.device_id = d.id order by p.ts desc limit 1) n
+    left join lateral (
+      select q.lat, q.lng, q.altitude, q.angle from positions q
+      where n.lat = 0 and n.lng = 0 and q.device_id = d.id and (q.lat <> 0 or q.lng <> 0)
+        and q.ts >= n.ts - make_interval(days => ${lookbackDays})
+      order by q.ts desc limit 1
+    ) f on true
+  `);
+  for (const row of rows.rows) {
+    const newest: Position = {
+      id: row.id,
+      deviceId: row.device_id,
+      ts: new Date(row.ts),
+      lat: row.lat,
+      lng: row.lng,
+      altitude: row.altitude,
+      angle: row.angle,
+      satellites: row.satellites,
+      speed: row.speed,
+      priority: row.priority,
+      ioData: row.io_data,
+    };
+    if (hasFix(newest)) {
+      result.set(row.device_id, newest);
+    } else if (row.fix_lat !== null && row.fix_lng !== null) {
+      result.set(row.device_id, { ...newest, lat: row.fix_lat, lng: row.fix_lng, altitude: row.fix_altitude ?? 0, angle: row.fix_angle ?? 0 });
+    }
+  }
+  return result;
+}
+
 /** A stretch of time during which a device was on a vehicle: what that device recorded in it belongs to the vehicle. `to` null: still on it. */
 export interface DeviceWindow {
   deviceId: string;

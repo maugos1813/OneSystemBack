@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { fleets, users, vehicles } from "../db/schema/index.js";
+import { invalidateDeviceFleets } from "../realtime/deviceFleet.js";
 
 /** What a map needs of a fleet: its name and the small picture that opens each plate. */
 export interface FleetTag {
@@ -65,7 +66,7 @@ export async function setFleetVehicles(orgId: string, fleetName: string, vehicle
   const fleet = clean(fleetName);
   const ids = [...new Set(vehicleIds)];
 
-  return db.transaction(async (tx) => {
+  const moved = await db.transaction(async (tx) => {
     if (ids.length > 0) {
       const own = await tx.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.orgId, orgId), inArray(vehicles.id, ids)));
       if (own.length !== ids.length) throw new FleetVehiclesError("Algún vehículo no existe en esta cuenta");
@@ -80,4 +81,7 @@ export async function setFleetVehicles(orgId: string, fleetName: string, vehicle
     if (ids.length > 0) await tx.update(vehicles).set({ fleetGroup: fleet }).where(and(eq(vehicles.orgId, orgId), inArray(vehicles.id, ids)));
     return { inFleet: ids.length, released: leaving.length };
   });
+  // Which flota a vehicle is in just changed: the live channel must not keep using what it remembered.
+  invalidateDeviceFleets();
+  return moved;
 }

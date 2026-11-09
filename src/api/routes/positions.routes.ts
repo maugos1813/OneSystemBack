@@ -3,10 +3,11 @@ import { z } from "zod";
 import {
   getDeviceEvents,
   getLatestPosition,
+  getLatestPositionsForDevices,
   getPositionHistory,
 } from "../../services/position.service.js";
 import { getVehicleDeviceWindows } from "../../services/vehicleAssignment.service.js";
-import { getVehicleForOrg } from "../../services/vehicle.service.js";
+import { getVehicleForOrg, listVehiclesForOrg } from "../../services/vehicle.service.js";
 import { requireAuth, requireModule } from "../middlewares/auth.middleware.js";
 
 const historyQuerySchema = z.object({
@@ -36,6 +37,29 @@ const AUTH: Array<Record<string, string[]>> = [{ bearerAuth: [] }];
 
 export async function positionsRoutes(app: FastifyInstance): Promise<void> {
   app.addHook("onRequest", requireAuth);
+
+  // The live map's starting point: the last position of every vehicle the caller may see, in one answer (it used to be one request per
+  // vehicle, each with its own authentication and lookups). The área restriction applies exactly as in the vehicle list.
+  app.get(
+    "/positions/latest",
+    {
+      schema: {
+        tags: ["Positions"],
+        summary: "Última posición conocida de todos los vehículos que puedes ver, por id de vehículo",
+        security: AUTH,
+      },
+    },
+    async (request) => {
+      const vehicles = (await listVehiclesForOrg(request.user.orgId, request.user.allowedArea)).filter((vehicle) => vehicle.deviceId);
+      const byDevice = await getLatestPositionsForDevices(vehicles.map((vehicle) => vehicle.deviceId!));
+      const out: Record<string, unknown> = {};
+      for (const vehicle of vehicles) {
+        const position = byDevice.get(vehicle.deviceId!);
+        if (position) out[vehicle.id] = position;
+      }
+      return out;
+    },
+  );
 
   app.get(
     "/vehicles/:id/positions/latest",
