@@ -5,6 +5,7 @@ import { db } from "../db/client.js";
 import { userRecoveryCodes, users, type User } from "../db/schema/index.js";
 import { decryptSecret, encryptSecret } from "./secretBox.js";
 import { generateTotpSecret, otpauthUri, verifyTotp } from "./totp.js";
+import { isEmailCodeLoginAvailable } from "./emailCode.service.js";
 import { hashSecret } from "./userSession.service.js";
 
 export const TOTP_ISSUER = "OneSystec";
@@ -16,11 +17,23 @@ export function isTotpRequired(role: User["role"]): boolean {
   return env.ADMIN_TOTP_REQUIRED && (role === "owner" || role === "admin");
 }
 
+/**
+ * Whether this role must use the authenticator app itself. Only when there is no email to send codes to: with email set up, the
+ * code by email satisfies the second step and the app is optional (an extra way, and the only one that works without the mailbox).
+ */
+export function isAuthenticatorRequired(role: User["role"]): boolean {
+  return isTotpRequired(role) && !isEmailCodeLoginAvailable();
+}
+
 export interface MfaStatus {
-  /** The authenticator is set up and asked for at every sign-in. */
+  /** The authenticator is set up and offered at every sign-in. */
   enabled: boolean;
-  /** This account's role may not be without it. */
+  /** This account's role may not be without the authenticator (no email codes available to stand in for it). */
   required: boolean;
+  /** Every sign-in of this account asks for a second step. */
+  secondStepRequired: boolean;
+  /** Codes are sent by email: that is the second step unless the authenticator is used instead. */
+  emailCodes: boolean;
   recoveryCodesLeft: number;
 }
 
@@ -29,7 +42,13 @@ export async function getMfaStatus(user: Pick<User, "id" | "role" | "totpEnabled
     .select({ left: sql<number>`count(*)::int` })
     .from(userRecoveryCodes)
     .where(and(eq(userRecoveryCodes.userId, user.id), isNull(userRecoveryCodes.usedAt)));
-  return { enabled: !!user.totpEnabledAt, required: isTotpRequired(user.role), recoveryCodesLeft: row?.left ?? 0 };
+  return {
+    enabled: !!user.totpEnabledAt,
+    required: isAuthenticatorRequired(user.role),
+    secondStepRequired: isTotpRequired(user.role) || !!user.totpEnabledAt,
+    emailCodes: isEmailCodeLoginAvailable(),
+    recoveryCodesLeft: row?.left ?? 0,
+  };
 }
 
 async function loadUser(userId: string): Promise<User | undefined> {

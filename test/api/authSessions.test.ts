@@ -446,7 +446,7 @@ describe("the authenticator for everyone else (optional)", () => {
   it("lets a viewer sign in with just the password, and shows it is not required", async () => {
     const viewer = await makeUser("viewer");
     const session = await signIn(viewer.email);
-    expect((await get("/auth/security", session.token)).json()).toEqual({ enabled: false, required: false, recoveryCodesLeft: 0 });
+    expect((await get("/auth/security", session.token)).json()).toEqual({ enabled: false, required: false, secondStepRequired: false, emailCodes: false, recoveryCodesLeft: 0 });
   });
 
   it("can be turned on from the app and then asks for the code at the next sign-in", async () => {
@@ -457,7 +457,7 @@ describe("the authenticator for everyone else (optional)", () => {
     const enabled = await post("/auth/totp/enable", { code: hotp(setup.secret, totpStep(Date.now())) }, bearer(session.token));
     expect(enabled.statusCode).toBe(200);
     expect(enabled.json().recoveryCodes).toHaveLength(10);
-    expect((await get("/auth/security", session.token)).json()).toEqual({ enabled: true, required: false, recoveryCodesLeft: 10 });
+    expect((await get("/auth/security", session.token)).json()).toEqual({ enabled: true, required: false, secondStepRequired: true, emailCodes: false, recoveryCodesLeft: 10 });
     expect((await login(viewer.email)).json().mfaRequired).toBe(true);
     // turning it on again is refused: it is already on
     expect((await post("/auth/totp/setup", {}, bearer(session.token))).statusCode).toBe(409);

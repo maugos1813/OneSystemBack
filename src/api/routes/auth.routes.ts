@@ -7,6 +7,7 @@ import {
   disableTotp,
   generateRecoveryCodes,
   getMfaStatus,
+  isAuthenticatorRequired,
   isTotpRequired,
   startTotpSetup,
   verifySecondFactor,
@@ -37,8 +38,8 @@ const loginSchema = z.object({
   password: z.string().min(1),
   /** "app" for the Android apps (their sessions last longer), "web" for a browser. */
   client: clientSchema,
-  /** "phone" when the person is on a phone (the app, or a phone's browser): there the second step is a code sent by email. */
-  channel: z.enum(["web", "phone"]).default("web"),
+  /** Kept for the apps already installed (they still send it); the second step no longer depends on the device. */
+  channel: z.enum(["web", "phone"]).optional(),
 });
 const emailLoginSchema = z.object({ mfaToken: z.string().min(1), code: z.string().min(6).max(8) });
 const emailResendSchema = z.object({ mfaToken: z.string().min(1) });
@@ -118,11 +119,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      const { client, channel } = parsed.data;
+      const { client } = parsed.data;
       const needsSecondStep = !!user.totpEnabledAt || isTotpRequired(user.role);
-      // On a phone nobody can scan a QR shown on that same screen, so there the second step is a code sent to the account's email
-      // (when email is set up; otherwise the authenticator app is used as on a computer, and nobody is locked out).
-      if (needsSecondStep && channel === "phone" && isEmailCodeLoginAvailable()) {
+      // The second step is a code sent to the account's email, on a phone and on a computer alike (so several people who read the same
+      // mailbox can share an account, and a lost phone locks nobody out). When email isn't set up, the authenticator app is what is
+      // asked for instead (and an admin must set it up first), so nobody is locked out.
+      if (needsSecondStep && isEmailCodeLoginAvailable()) {
         const sent = await issueEmailCode({ id: user.id, email: user.email, language: toLanguage(user.language) });
         if (sent.outcome === "limit") return reply.code(429).send({ error: "Too many attempts. Try again later." });
         if (sent.outcome === "sent" || sent.outcome === "recent") {
@@ -131,7 +133,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             method: "email",
             mfaToken: signMfaToken({ userId: user.id, purpose: "mfa-email", client }),
             emailHint: maskEmail(user.email),
-            // An account that also has the authenticator can use it instead.
+            // An account that also has the authenticator app can use it instead.
             ...(user.totpEnabledAt ? { alternativeMfaToken: signMfaToken({ userId: user.id, purpose: "mfa", client }) } : {}),
           };
         }
@@ -375,7 +377,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = sensitiveSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-      if (isTotpRequired(request.user.role)) return reply.code(403).send({ error: "El autenticador es obligatorio para tu rol" });
+      if (isAuthenticatorRequired(request.user.role)) return reply.code(403).send({ error: "El autenticador es obligatorio para tu rol" });
       if (!(await confirmSensitive(request, reply, parsed.data))) return;
       await disableTotp(request.user.userId);
       await revokeAllUserSessions(request.user.userId, request.user.sid);

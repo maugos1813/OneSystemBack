@@ -2,7 +2,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-/** Signing in from a phone: the second step is a 6-digit code sent to the account's email (a computer keeps the QR and the authenticator). */
+/** The second step is a 6-digit code sent to the account's email, on a phone and on a computer alike; the authenticator app is optional. */
 vi.mock("../../src/db/client.js", async () => {
   const schema = await import("../../src/db/schema/index.js");
   const pg = new PGlite();
@@ -107,11 +107,27 @@ describe("signing in from a phone", () => {
     expect(renewed.statusCode).toBe(200);
   });
 
-  it("does not ask a computer for an email code: it keeps the QR (the admin must set up the authenticator there)", async () => {
+  it("sends the code on a computer too: the authenticator (and its QR) is no longer needed to get in", async () => {
     const admin = await makeUser("admin");
     const res = await login(admin.email, "web");
-    expect(res.json()).toHaveProperty("mfaSetupRequired", true);
-    expect(mail.sent).toHaveLength(0);
+    expect(res.json()).toMatchObject({ mfaRequired: true, method: "email" });
+    expect(res.json()).not.toHaveProperty("mfaSetupRequired");
+    expect(mail.sent).toHaveLength(1);
+    const ok = await post("/auth/login/email", { mfaToken: res.json().mfaToken, code: lastCode() });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toHaveProperty("refreshToken");
+  });
+
+  it("lets several people who read the same mailbox share an account: each login gets a code", async () => {
+    const shared = await makeUser("owner");
+    for (let i = 0; i < 2; i++) {
+      const res = await login(shared.email, i === 0 ? "web" : "phone");
+      expect(res.json()).toMatchObject({ method: "email" });
+      const session = await post("/auth/login/email", { mfaToken: res.json().mfaToken, code: lastCode() });
+      expect(session.statusCode).toBe(200);
+      // the next code can be asked for right away in this test (the wait between sends is for real mailboxes)
+      await db.delete(schema.userEmailCodes).where(eq(schema.userEmailCodes.userId, shared.id));
+    }
   });
 
   it("falls back to the authenticator flow when email isn't set up, so nobody is locked out", async () => {
@@ -119,6 +135,35 @@ describe("signing in from a phone", () => {
     const admin = await makeUser("admin");
     expect((await login(admin.email, "phone")).json()).toHaveProperty("mfaSetupRequired", true);
     expect(mail.sent).toHaveLength(0);
+  });
+
+  it("makes the authenticator optional for an admin while email codes work: they may turn it off", async () => {
+    const admin = await makeUser("admin");
+    const secret = await withAuthenticator(admin.id);
+    const note = (await login(admin.email, "web")).json();
+    expect(note.alternativeMfaToken).toBeTruthy();
+    const session = (await post("/auth/login/email", { mfaToken: note.mfaToken, code: lastCode() })).json() as { token: string };
+    const auth = { authorization: `Bearer ${session.token}` };
+    const status = (await app.inject({ method: "GET", url: "/auth/security", headers: auth })).json();
+    expect(status).toMatchObject({ enabled: true, required: false, secondStepRequired: true, emailCodes: true });
+    const off = await post("/auth/totp/disable", { password: PASSWORD, code: hotp(secret, totpStep(Date.now()) + 1) }, auth);
+    expect(off.statusCode).toBe(204);
+    // and signing in still asks for the second step (by email)
+    await db.delete(schema.userEmailCodes).where(eq(schema.userEmailCodes.userId, admin.id));
+    expect((await login(admin.email, "web")).json()).toMatchObject({ mfaRequired: true, method: "email" });
+  });
+
+  it("keeps the authenticator obligatory for admins when email codes aren't available", async () => {
+    mail.available = false;
+    const admin = await makeUser("admin");
+    const secret = await withAuthenticator(admin.id);
+    const note = (await login(admin.email, "web")).json();
+    expect(note).toMatchObject({ mfaRequired: true });
+    expect(note).not.toHaveProperty("method");
+    const session = (await post("/auth/login/totp", { mfaToken: note.mfaToken, code: hotp(secret, totpStep(Date.now())) })).json() as { token: string };
+    const auth = { authorization: `Bearer ${session.token}` };
+    expect((await app.inject({ method: "GET", url: "/auth/security", headers: auth })).json()).toMatchObject({ required: true, emailCodes: false });
+    expect((await post("/auth/totp/disable", { password: PASSWORD, code: hotp(secret, totpStep(Date.now()) + 1) }, auth)).statusCode).toBe(403);
   });
 
   it("lets a plain user in with just the password, as before (they have no second step)", async () => {
