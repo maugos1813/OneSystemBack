@@ -302,6 +302,13 @@
       "when": 1794180155357,
       "tag": "0042_email_login_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794182917523,
+      "tag": "0043_qr_login_requests",
+      "breakpoints": true
     }
   ]
 }

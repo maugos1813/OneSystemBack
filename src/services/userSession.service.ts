@@ -271,3 +271,9 @@ export async function listUserSessions(userId: string, currentSessionId?: string
     current: row.id === currentSessionId,
   }));
 }
+
+/** One session by id (null if it doesn't exist), for the rules that depend on how a session was opened. */
+export async function getSession(sessionId: string): Promise<UserSession | null> {
+  const [row] = await db.select().from(userSessions).where(eq(userSessions.id, sessionId)).limit(1);
+  return row ?? null;
+}

@@ -73,3 +73,36 @@ export async function rateLimitSecondFactor(request: FastifyRequest, reply: Fast
   await refuse(reply, Math.max(...blocked.map((r) => r.retryAfterSec)));
   return true;
 }
+
+/**
+ * "Enter with the phone": starting a QR is public (the login screen asks for one every couple of minutes), polling it is a request
+ * every second or two, and approving is for people already signed in. Generous for a person, hopeless for a script.
+ */
+export const QR_LIMITS = { startPerAddress: 20, pollPerAddress: 240, actionPerUser: 30 } as const;
+let qrStartByAddress = new FixedWindowLimiter(QR_LIMITS.startPerAddress, 60_000);
+let qrPollByAddress = new FixedWindowLimiter(QR_LIMITS.pollPerAddress, 60_000);
+let qrActionByUser = new FixedWindowLimiter(QR_LIMITS.actionPerUser, WINDOW_MS);
+
+export function resetQrLimits(): void {
+  qrStartByAddress = new FixedWindowLimiter(QR_LIMITS.startPerAddress, 60_000);
+  qrPollByAddress = new FixedWindowLimiter(QR_LIMITS.pollPerAddress, 60_000);
+  qrActionByUser = new FixedWindowLimiter(QR_LIMITS.actionPerUser, WINDOW_MS);
+}
+
+export async function rateLimitQrStart(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const result = qrStartByAddress.hit(clientAddress(request));
+  if (!result.allowed) await refuse(reply, result.retryAfterSec);
+}
+
+export async function rateLimitQrPoll(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const result = qrPollByAddress.hit(clientAddress(request));
+  if (!result.allowed) await refuse(reply, result.retryAfterSec);
+}
+
+/** Counts one scan/approval by a signed-in user; over the limit it answers 429 and returns true. */
+export async function rateLimitQrAction(request: FastifyRequest, reply: FastifyReply, userId: string): Promise<boolean> {
+  const result = qrActionByUser.hit(userId);
+  if (result.allowed) return false;
+  await refuse(reply, result.retryAfterSec);
+  return true;
+}

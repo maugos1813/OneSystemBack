@@ -20,6 +20,7 @@ import { getOrganizationBrief, isPlatformUser } from "../../services/platform.se
 import type { User } from "../../db/schema/index.js";
 import {
   createSession,
+  getSession,
   listUserSessions,
   revokeAllUserSessions,
   revokeByRefreshToken,
@@ -29,7 +30,8 @@ import {
   type SessionClient,
 } from "../../services/userSession.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
-import { clientAddress, rateLimitLogin, rateLimitSecondFactor } from "../middlewares/loginRateLimit.js";
+import { clientAddress, rateLimitLogin, rateLimitQrAction, rateLimitQrPoll, rateLimitQrStart, rateLimitSecondFactor } from "../middlewares/loginRateLimit.js";
+import { approveQrLogin, claimQrLogin, denyQrLogin, inspectQrLogin, QR_LOGIN_TTL_MS, startQrLogin } from "../../services/qrLogin.service.js";
 
 const clientSchema = z.enum(["web", "app"]).default("web");
 
@@ -54,6 +56,7 @@ const enableSchema = z.object({ code });
 const sensitiveSchema = z
   .object({ password: z.string().min(1), code: code.optional(), recoveryCode: z.string().min(8).max(20).optional() })
   .refine((body) => !!body.code !== !!body.recoveryCode, { message: "Send either code or recoveryCode" });
+const qrCodeSchema = z.object({ code: z.string().min(10).max(200) });
 const refreshSchema = z.object({ refreshToken: z.string().min(1) });
 const logoutSchema = z.object({ refreshToken: z.string().min(1).optional() });
 
@@ -66,13 +69,15 @@ async function openSession(
   user: Pick<User, "id" | "orgId" | "role" | "allowedArea">,
   client: SessionClient,
   mfa: boolean,
+  /** For a session that opens on a device other than the one making this request (the computer that showed a QR). */
+  device?: { userAgent: string; ip: string | null },
 ) {
   const { session, refreshToken } = await createSession({
     userId: user.id,
     client,
     mfa,
-    userAgent: request.headers["user-agent"],
-    ip: clientAddress(request),
+    userAgent: device ? device.userAgent : request.headers["user-agent"],
+    ip: device ? (device.ip ?? undefined) : clientAddress(request),
   });
   return { token: signLoginToken(app, user, session.id), refreshToken, expiresIn: 15 * 60, sessionId: session.id };
 }
@@ -249,6 +254,81 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       const user = await findUserById(claims.userId);
       if (!confirmed || !user) return reply.code(401).send({ error: "Invalid code" });
       return reply.send({ ...(await openSession(app, request, user, claims.client, true)), recoveryCodes: confirmed.recoveryCodes });
+    },
+  );
+
+  // --- "Enter with the phone": the computer shows a QR, a phone that is already signed in authorizes it
+  app.post(
+    "/auth/qr/start",
+    { preHandler: rateLimitQrStart, schema: { tags: ["Auth"], summary: "Pedir un QR para entrar con el celular (lo muestra la pantalla de login de la web)" } },
+    async (request) => {
+      const { code, expiresAt } = await startQrLogin({ userAgent: request.headers["user-agent"], ip: clientAddress(request) });
+      return { code, expiresAt, expiresInSec: QR_LOGIN_TTL_MS / 1000 };
+    },
+  );
+
+  app.post(
+    "/auth/qr/poll",
+    { preHandler: rateLimitQrPoll, schema: { tags: ["Auth"], summary: "¿Ya autorizó el celular? Si sí, entrega la sesión (una sola vez)", body: zodToJsonSchema(qrCodeSchema) } },
+    async (request, reply) => {
+      const parsed = qrCodeSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      const claim = await claimQrLogin(parsed.data.code);
+      if (claim.status !== "approved") return { status: claim.status };
+      const user = await findUserById(claim.userId);
+      // An account that must pass a second step is only let in by a phone whose own session passed it (approval checks this too).
+      if (!user || (isTotpRequired(user.role) && !claim.mfa)) return { status: "expired" };
+      const session = await openSession(app, request, user, claim.client, claim.mfa, { userAgent: claim.userAgent, ip: claim.ip });
+      return { status: "approved", ...session };
+    },
+  );
+
+  app.post(
+    "/auth/qr/inspect",
+    { preHandler: requireLoginToken, schema: { tags: ["Auth"], summary: "Desde el celular: qué computador pide entrar (antes de autorizar)", security: AUTH, body: zodToJsonSchema(qrCodeSchema) } },
+    async (request, reply) => {
+      const parsed = qrCodeSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      if (await rateLimitQrAction(request, reply, request.user.userId)) return;
+      const info = await inspectQrLogin(parsed.data.code);
+      if (!info) return reply.code(404).send({ error: "QR expired or not valid" });
+      return info;
+    },
+  );
+
+  app.post(
+    "/auth/qr/approve",
+    { preHandler: requireLoginToken, schema: { tags: ["Auth"], summary: "Desde el celular: autorizar que ese computador entre con mi cuenta", security: AUTH, body: zodToJsonSchema(qrCodeSchema) } },
+    async (request, reply) => {
+      const parsed = qrCodeSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      if (await rateLimitQrAction(request, reply, request.user.userId)) return;
+
+      // Only a phone app that is itself signed in can open a computer, and one whose own sign-in passed the second step if the account has one.
+      const session = request.user.sid ? await getSession(request.user.sid) : null;
+      if (!session || session.revokedAt || session.client !== "app") {
+        return reply.code(403).send({ error: "Solo la app del celular puede autorizar un acceso" });
+      }
+      const user = await findUserById(request.user.userId);
+      if (!user) return reply.code(404).send({ error: "User not found" });
+      if ((!!user.totpEnabledAt || isTotpRequired(user.role)) && !session.mfa) {
+        return reply.code(403).send({ error: "Vuelve a iniciar sesión en la app para poder autorizar" });
+      }
+      const result = await approveQrLogin(parsed.data.code, { userId: user.id, mfa: session.mfa });
+      if (result !== "ok") return reply.code(404).send({ error: "QR expired or not valid" });
+      return reply.code(204).send();
+    },
+  );
+
+  app.post(
+    "/auth/qr/deny",
+    { preHandler: requireLoginToken, schema: { tags: ["Auth"], summary: "Desde el celular: rechazar el acceso pedido por ese QR", security: AUTH, body: zodToJsonSchema(qrCodeSchema) } },
+    async (request, reply) => {
+      const parsed = qrCodeSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+      if (await rateLimitQrAction(request, reply, request.user.userId)) return;
+      await denyQrLogin(parsed.data.code);
+      return reply.code(204).send();
     },
   );
 

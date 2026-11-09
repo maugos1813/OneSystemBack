@@ -72,3 +72,30 @@ export const userEmailCodes = pgTable(
   },
   (table) => [index("user_email_codes_user_idx").on(table.userId)],
 );
+
+/**
+ * "Enter with the phone" (the WhatsApp Web way): the computer shows a QR carrying `<id>.<secret>`, a phone that is already signed in
+ * scans it and authorizes, and the computer's next poll receives its own new session. Short-lived, one use; only a hash of the
+ * secret is kept.
+ */
+export const qrLoginRequests = pgTable(
+  "qr_login_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    secretHash: varchar("secret_hash", { length: 64 }).notNull(),
+    /** The computer asking to get in, as seen when it started: shown to the person on the phone before they authorize. */
+    userAgent: varchar("user_agent", { length: 300 }).notNull().default(""),
+    device: varchar("device", { length: 120 }).notNull().default(""),
+    ip: varchar("ip", { length: 45 }),
+    /** "pending" → "approved" (a phone said yes) → "claimed" (the computer took its session); or "denied". */
+    status: varchar("status", { length: 10 }).notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    approvedUserId: uuid("approved_user_id").references(() => users.id, { onDelete: "cascade" }),
+    /** Whether the phone's own session had passed its second step: the computer's session inherits it. */
+    approvedMfa: boolean("approved_mfa").notNull().default(false),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+  },
+  (table) => [index("qr_login_requests_created_idx").on(table.createdAt)],
+);
