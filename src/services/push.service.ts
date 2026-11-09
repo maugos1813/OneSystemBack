@@ -1,9 +1,9 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, notInArray, or } from "drizzle-orm";
 import { GoogleAuth } from "google-auth-library";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
-import { pushTokens } from "../db/schema/index.js";
+import { pushTokens, userSessions } from "../db/schema/index.js";
 import { DEFAULT_LANGUAGE, type Language } from "./i18n.js";
 
 export interface PushMessage {
@@ -93,7 +93,24 @@ export async function sendPushToUsers(userIds: readonly string[], message: PushM
   const creds = serviceAccount();
   if (!creds || userIds.length === 0) return 0;
   try {
-    const rows = await db.select().from(pushTokens).where(inArray(pushTokens.userId, [...userIds]));
+    const now = new Date();
+    // Only phones whose sign-in is still open: a session that ended (expired, signed out elsewhere, password changed) leaves its
+    // phone registered, and this person's alerts must not keep appearing on a phone they are no longer signed in on.
+    const rows = await db
+      .select({ id: pushTokens.id, token: pushTokens.token })
+      .from(pushTokens)
+      .innerJoin(userSessions, eq(userSessions.id, pushTokens.sessionId))
+      .where(
+        and(
+          inArray(pushTokens.userId, [...userIds]),
+          eq(userSessions.userId, pushTokens.userId),
+          isNull(userSessions.revokedAt),
+          gt(userSessions.expiresAt, now),
+          gt(userSessions.absoluteExpiresAt, now),
+        ),
+      );
+    // Forgotten for good: registered phones whose session is over (or that never had one) will register again when signed in.
+    await forgetEndedPhones(userIds, now);
     if (rows.length === 0) return 0;
     const bearer = await accessToken(creds);
     let sent = 0;
@@ -111,12 +128,34 @@ export async function sendPushToUsers(userIds: readonly string[], message: PushM
   }
 }
 
-/** Remembers a phone for a user (moving it from whoever signed in on it before). */
-export async function saveToken(userId: string, orgId: string, token: string, platform: string, now: Date = new Date()): Promise<void> {
+/** Deletes these users' phones whose sign-in is over (revoked, expired, or from before phones were tied to a session). */
+async function forgetEndedPhones(userIds: readonly string[], now: Date): Promise<void> {
+  const open = db
+    .select({ id: userSessions.id })
+    .from(userSessions)
+    .where(and(isNull(userSessions.revokedAt), gt(userSessions.expiresAt, now), gt(userSessions.absoluteExpiresAt, now)));
+  const ended = await db
+    .select({ id: pushTokens.id })
+    .from(pushTokens)
+    .where(and(inArray(pushTokens.userId, [...userIds]), or(isNull(pushTokens.sessionId), notInArray(pushTokens.sessionId, open))));
+  if (ended.length > 0) {
+    await db.delete(pushTokens).where(inArray(pushTokens.id, ended.map((row) => row.id)));
+  }
+}
+
+/** Remembers a phone for a user, under the session they are signed in with (moving it from whoever signed in on it before). */
+export async function saveToken(
+  userId: string,
+  orgId: string,
+  token: string,
+  platform: string,
+  sessionId: string,
+  now: Date = new Date(),
+): Promise<void> {
   await db
     .insert(pushTokens)
-    .values({ userId, orgId, token, platform, lastSeenAt: now })
-    .onConflictDoUpdate({ target: pushTokens.token, set: { userId, orgId, platform, lastSeenAt: now } });
+    .values({ userId, orgId, token, platform, sessionId, lastSeenAt: now })
+    .onConflictDoUpdate({ target: pushTokens.token, set: { userId, orgId, platform, sessionId, lastSeenAt: now } });
 }
 
 /** Forgets a phone — only if it belongs to this user, so nobody can unregister someone else's. */

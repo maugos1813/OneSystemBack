@@ -21,14 +21,14 @@ describe("/push-tokens", () => {
     mocks.saveToken.mockReset();
     mocks.removeToken.mockReset();
   });
-  const as = (role = "viewer") => ({ authorization: `Bearer ${app.jwt.sign({ userId: "u1", orgId: "org-1", role, allowedArea: "PIAZZA" } as never)}` });
+  const as = (role = "viewer") => ({ authorization: `Bearer ${app.jwt.sign({ userId: "u1", orgId: "org-1", role, allowedArea: "PIAZZA", sid: "s1" } as never)}` });
 
   it("registers the phone of whoever is signed in, for any role", async () => {
     for (const role of ["viewer", "manager", "admin", "owner"]) {
       const res = await app.inject({ method: "POST", url: "/push-tokens", headers: as(role), payload: { token: TOKEN } });
       expect(res.statusCode, role).toBe(204);
     }
-    expect(mocks.saveToken).toHaveBeenLastCalledWith("u1", "org-1", TOKEN, "android");
+    expect(mocks.saveToken).toHaveBeenLastCalledWith("u1", "org-1", TOKEN, "android", "s1");
   });
 
   it("needs a session, and refuses an API key", async () => {

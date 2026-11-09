@@ -25,7 +25,9 @@ export async function pushTokensRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const parsed = tokenSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-      await saveToken(request.user.userId, request.user.orgId, parsed.data.token, parsed.data.platform);
+      // A phone is tied to the sign-in it registers under, so it stops receiving this person's alerts when that session ends.
+      if (!request.user.sid) return reply.code(403).send({ error: "Forbidden" });
+      await saveToken(request.user.userId, request.user.orgId, parsed.data.token, parsed.data.platform, request.user.sid);
       return reply.code(204).send();
     },
   );
