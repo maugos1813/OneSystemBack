@@ -87,6 +87,18 @@ describe("/devices routes", () => {
       expect(platform.json()).toEqual([RAW]);
     });
 
+    it("hides them from OneSystec too while it looks at a client's account (it sees what the client sees)", async () => {
+      mocks.listDevicesForOrg.mockResolvedValue([RAW]);
+      mocks.getDeviceDetail.mockResolvedValue({ device: RAW, io: [], sim: null });
+      who.platform = true;
+      const headers = { authorization: `Bearer ${app.jwt.sign({ userId: "u1", orgId: "org-1", role: "admin", allowedArea: null, viewAs: true } as never)}` };
+      const list = await app.inject({ method: "GET", url: "/devices", headers });
+      expect(JSON.stringify(list.json())).not.toContain("860848088107876");
+      const sheet = await app.inject({ method: "GET", url: `/devices/${DEVICE_ID}`, headers });
+      expect(sheet.json().device.imei).toBe("");
+      expect(mocks.getDeviceDetail).toHaveBeenCalledWith("org-1", DEVICE_ID, { allowedArea: null, includeSim: false });
+    });
+
     it("hides the same fields and the SIM in a client's device sheet", async () => {
       mocks.getDeviceDetail.mockResolvedValue({ device: RAW, io: [], sim: null });
       who.platform = false;

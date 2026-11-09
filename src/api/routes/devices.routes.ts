@@ -59,7 +59,8 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
     async (request) => {
       const list = await listDevicesForOrg(request.user.orgId, request.user.allowedArea);
       // The IMEI, serial and firmware are OneSystec's; a client sees its devices by vehicle and model.
-      return (await isPlatformUser(request.user.userId)) ? list : list.map(redactDevice);
+      // OneSystec looking at a client's account sees what that client sees: no IMEI there either.
+      return (await isPlatformUser(request.user.userId)) && !request.user.viewAs ? list : list.map(redactDevice);
     },
   );
 
@@ -120,7 +121,7 @@ export async function devicesRoutes(app: FastifyInstance): Promise<void> {
       if (!params.success) return reply.code(400).send({ error: "Invalid device id" });
 
       const { orgId, role, allowedArea, userId } = request.user;
-      const platform = await isPlatformUser(userId);
+      const platform = (await isPlatformUser(userId)) && !request.user.viewAs;
       const detail = await getDeviceDetail(orgId, params.data.id, {
         allowedArea,
         // The SIM (number, ICCID) and the hardware identity are OneSystec's, not the client's.
