@@ -12,6 +12,7 @@ import {
   listRegisteredBeacons,
   renameBeacon,
 } from "../../services/driverBeacon.service.js";
+import { isPlatformUser } from "../../services/platform.service.js";
 import { requireAuth, requireModule, requireRole } from "../middlewares/auth.middleware.js";
 
 /**
@@ -108,6 +109,10 @@ export async function driverBeaconsRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const body = createSchema.safeParse(request.body);
       if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
+      // EYE Beacons are handed out by OneSystec: a client does not register a beacon from its MAC (OneSystec does, from its client's page).
+      if (body.data.mac !== undefined && !(await isPlatformUser(request.user.userId))) {
+        return reply.code(403).send({ error: "Los beacons los asigna OneSystec: contáctala para recibir el servicio" });
+      }
       try {
         return reply.code(201).send(await createBeacon(request.user.orgId, body.data));
       } catch (err) {

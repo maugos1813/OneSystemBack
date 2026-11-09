@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   setOrganizationSections: vi.fn(),
   setOrganizationLogo: vi.fn(),
 }));
+const beacons = vi.hoisted(() => ({ createBeacon: vi.fn(), listRegisteredBeacons: vi.fn(), deleteBeacon: vi.fn() }));
+vi.mock("../../src/services/driverBeacon.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/driverBeacon.service.js")>()),
+  ...beacons,
+}));
 vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
   ...mocks,
@@ -70,6 +75,18 @@ describe("cross-client administration is for one account alone", () => {
       expect(created.statusCode).toBe(201);
       expect(created.json()).toEqual({ orgId: CLIENT_ORG, userId: "u9" });
     }
+  });
+
+  it("lets OneSystec hand an EYE Beacon to a client by its MAC, and nobody else", async () => {
+    mocks.getOrganizationBrief.mockResolvedValue({ id: CLIENT_ORG, name: "Cliente" });
+    beacons.createBeacon.mockResolvedValue({ id: "b1" });
+    const url = `/platform/organizations/${CLIENT_ORG}/driver-beacons`;
+    const payload = { mac: "7C:D9:F4:0B:39:E3", driverName: "Luca" };
+    expect((await app.inject({ method: "POST", url, headers: as(CLIENT_ORG, "owner"), payload })).statusCode).toBe(403);
+    expect(beacons.createBeacon).not.toHaveBeenCalled();
+    const ok = await app.inject({ method: "POST", url, headers: as(SAME_ORG, "owner", "platform-user"), payload });
+    expect(ok.statusCode).toBe(201);
+    expect(beacons.createBeacon).toHaveBeenCalledWith(CLIENT_ORG, payload);
   });
 
   it("returns 404 for an unknown client and 400 for a malformed id", async () => {

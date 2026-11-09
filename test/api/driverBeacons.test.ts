@@ -9,6 +9,11 @@ vi.mock("../../src/db/client.js", async () => {
   const pg = new PGlite();
   return { db: drizzle(pg, { schema }), pool: {}, __pg: pg };
 });
+const platform = vi.hoisted(() => ({ users: new Set<string>() }));
+vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
+  isPlatformUser: async (userId: string) => platform.users.has(userId),
+}));
 vi.mock("../../src/services/userModules.service.js", () => ({
   getUserModules: async () => ["vehiculos", "historial", "conduccion"],
 }));
@@ -67,6 +72,7 @@ beforeAll(async () => {
     INSERT INTO positions (device_id, ts, lat, lng, speed, io_data) VALUES ${rows.join(",")};
   `);
   app = await buildApp();
+  platform.users.add(id(90)); // the default test account is one of OneSystec's people; a client is tried explicitly below
 });
 
 afterAll(async () => {
@@ -101,6 +107,14 @@ describe("driver beacons", () => {
     expect(created.json()).toMatchObject({ beaconId: "eddystone:00000000000000000000-7cd9f40b39e3", driverName: "Luca Bianchi" });
     expect((await call("POST", "/driver-beacons", as("owner", null), { mac: "7cd9f40b39e3", driverName: "Otro" })).statusCode).toBe(409);
     expect((await call("POST", "/driver-beacons", as("owner", null), { mac: "7CD9-F40B-39E4", driverName: "Anna" })).statusCode).toBe(201);
+  });
+
+  it("does not let a client register a beacon from its MAC: OneSystec hands the beacons out", async () => {
+    const client = { authorization: `Bearer ${app.jwt.sign({ userId: id(91), orgId: ORG, role: "owner", allowedArea: null } as never)}` };
+    const res = await call("POST", "/driver-beacons", client, { mac: "AA:BB:CC:00:11:22", driverName: "Intruso" });
+    expect(res.statusCode).toBe(403);
+    const list = await call("GET", "/driver-beacons", client);
+    expect((list.json() as Array<{ driverName: string }>).some((b) => b.driverName === "Intruso")).toBe(false);
   });
 
   it("refuses a bad MAC, and a request with both or neither identifier", async () => {

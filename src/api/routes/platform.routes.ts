@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { createBeacon, deleteBeacon, DriverBeaconError, listRegisteredBeacons } from "../../services/driverBeacon.service.js";
 import { findUserById } from "../../services/auth.service.js";
 import { disableTotp } from "../../services/mfa.service.js";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
@@ -47,6 +48,56 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
       const detail = await getOrganizationDetail(parsed.data);
       if (!detail) return reply.code(404).send({ error: "Organization not found" });
       return detail;
+    },
+  );
+
+  // The EYE Beacons of a client: OneSystec hands them out (by the MAC on the label) and takes them back.
+  const beaconParams = z.object({ id: z.string().uuid(), beaconId: z.string().uuid() });
+  const beaconBody = z.object({ mac: z.string().trim().min(12).max(17), driverName: z.string().trim().min(1).max(100) });
+
+  app.get<{ Params: { id: string } }>(
+    "/platform/organizations/:id/driver-beacons",
+    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Los EYE Beacon asignados a un cliente (solo OneSystec)", security: AUTH } },
+    async (request, reply) => {
+      const id = z.string().uuid().safeParse(request.params.id);
+      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
+      return listRegisteredBeacons(id.data);
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/platform/organizations/:id/driver-beacons",
+    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Asignar un EYE Beacon a un cliente por su MAC (solo OneSystec)", security: AUTH } },
+    async (request, reply) => {
+      const id = z.string().uuid().safeParse(request.params.id);
+      const body = beaconBody.safeParse(request.body);
+      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
+      if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
+      if (request.user.viewAs) return reply.code(403).send({ error: "Estás viendo la cuenta de un cliente: es solo lectura" });
+      if (!(await getOrganizationBrief(id.data))) return reply.code(404).send({ error: "Organization not found" });
+      try {
+        return reply.code(201).send(await createBeacon(id.data, body.data));
+      } catch (err) {
+        if (err instanceof DriverBeaconError) return reply.code(err.status).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string; beaconId: string } }>(
+    "/platform/organizations/:id/driver-beacons/:beaconId",
+    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Quitar un EYE Beacon a un cliente (solo OneSystec)", security: AUTH } },
+    async (request, reply) => {
+      const params = beaconParams.safeParse(request.params);
+      if (!params.success) return reply.code(400).send({ error: "Invalid id" });
+      if (request.user.viewAs) return reply.code(403).send({ error: "Estás viendo la cuenta de un cliente: es solo lectura" });
+      try {
+        await deleteBeacon(params.data.id, params.data.beaconId);
+        return reply.code(204).send();
+      } catch (err) {
+        if (err instanceof DriverBeaconError) return reply.code(err.status).send({ error: err.message });
+        throw err;
+      }
     },
   );
 
