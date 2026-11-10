@@ -4,12 +4,15 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   createVehicle,
   deleteVehicle,
+  deviceInOrg,
+  getVehicleAnyOrg,
   getVehicleForOrg,
   listVehiclesForOrg,
   updateVehicle,
 } from "../../services/vehicle.service.js";
 import { getUserModules } from "../../services/userModules.service.js";
 import { getVehicleProfile, listVehicleOdometers, ProfileError, setVehicleOdometer } from "../../services/vehicleProfile.service.js";
+import { isPlatformUser } from "../../services/platform.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const profileText = (max: number) =>
@@ -190,7 +193,18 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      const vehicle = await updateVehicle(request.user.orgId, id, parsed.data);
+      let vehicle = await updateVehicle(request.user.orgId, id, parsed.data);
+      // OneSystec's overview lists the vehicles of every client: one that is not in its own organization is edited on the client
+      // that owns it (and never with a device of another client). For anyone else it simply does not exist.
+      if (!vehicle && !isClient(request) && !request.user.viewAs && (await isPlatformUser(request.user.userId))) {
+        const elsewhere = await getVehicleAnyOrg(id);
+        if (elsewhere) {
+          if (parsed.data.deviceId && !(await deviceInOrg(elsewhere.orgId, parsed.data.deviceId))) {
+            return reply.code(400).send({ error: "Ese dispositivo es de otro cliente: entrégaselo a este cliente primero" });
+          }
+          vehicle = await updateVehicle(elsewhere.orgId, id, parsed.data);
+        }
+      }
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
       return vehicle;
     },
