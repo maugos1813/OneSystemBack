@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { devices, organizations, users, vehicles, type Device, type Position, type Vehicle } from "../db/schema/index.js";
 import { env } from "../config/env.js";
@@ -6,6 +6,7 @@ import { registerOrganizationWithOwner } from "./auth.service.js";
 import { setFleetLogo } from "./fleet.service.js";
 import { sanitizeOrgSections } from "./modules.js";
 import { getLatestPosition } from "./position.service.js";
+import { invalidateDeviceFleets } from "../realtime/deviceFleet.js";
 
 /**
  * The platform is OneSystec: the people whose email is in PLATFORM_ADMIN_EMAILS. An email, not an organization: OneSystec's
@@ -88,6 +89,8 @@ export interface OrganizationDetail extends OrganizationSummary {
     lastSeenAt: Date | null;
     vehicle: { name: string; plate: string | null } | null;
   }>;
+  /** The client's vehicles and the device each has: OneSystec is the one who assigns devices. */
+  vehicleList: Array<{ id: string; name: string; plate: string | null; fleetGroup: string | null; deviceId: string | null }>;
 }
 
 export async function getOrganizationDetail(id: string): Promise<OrganizationDetail | undefined> {
@@ -124,7 +127,43 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
     logo: org.logo ?? null,
     members: members.map(({ totpEnabledAt, ...member }) => ({ ...member, totpEnabled: !!totpEnabledAt })),
     deviceList,
+    vehicleList: await db
+      .select({ id: vehicles.id, name: vehicles.name, plate: vehicles.plate, fleetGroup: vehicles.fleetGroup, deviceId: vehicles.deviceId })
+      .from(vehicles)
+      .where(eq(vehicles.orgId, id))
+      .orderBy(asc(vehicles.name)),
   };
+}
+
+export class AssignDeviceError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * OneSystec gives a device to a vehicle of a client (or takes it off with null). The device must be one of that client's (the
+ * ones OneSystec handed over by IMEI) and not already on another vehicle.
+ */
+export async function assignDeviceToVehicle(orgId: string, vehicleId: string, deviceId: string | null): Promise<{ id: string; deviceId: string | null }> {
+  const [vehicle] = await db.select({ id: vehicles.id }).from(vehicles).where(and(eq(vehicles.id, vehicleId), eq(vehicles.orgId, orgId))).limit(1);
+  if (!vehicle) throw new AssignDeviceError(404, "Vehicle not found");
+  if (deviceId) {
+    const [device] = await db.select({ id: devices.id }).from(devices).where(and(eq(devices.id, deviceId), eq(devices.orgId, orgId))).limit(1);
+    if (!device) throw new AssignDeviceError(404, "Device not found in this organization");
+    const [taken] = await db
+      .select({ id: vehicles.id })
+      .from(vehicles)
+      .where(and(eq(vehicles.deviceId, deviceId), ne(vehicles.id, vehicleId)))
+      .limit(1);
+    if (taken) throw new AssignDeviceError(409, "Ese dispositivo ya está en otro vehículo");
+  }
+  await db.update(vehicles).set({ deviceId }).where(eq(vehicles.id, vehicleId));
+  invalidateDeviceFleets();
+  return { id: vehicleId, deviceId };
 }
 
 /** A new client: its organization with its first user (the owner), same as the public sign-up but done by OneSystec. */

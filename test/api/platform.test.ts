@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   getOrganizationDetail: vi.fn(),
   getOrganizationBrief: vi.fn(),
   getPlatformFleet: vi.fn(),
+  assignDeviceToVehicle: vi.fn(),
   setUserLogo: vi.fn(),
   setOrganizationSections: vi.fn(),
   setOrganizationLogo: vi.fn(),
@@ -87,6 +88,22 @@ describe("cross-client administration is for one account alone", () => {
     const ok = await app.inject({ method: "POST", url, headers: as(SAME_ORG, "owner", "platform-user"), payload });
     expect(ok.statusCode).toBe(201);
     expect(beacons.createBeacon).toHaveBeenCalledWith(CLIENT_ORG, payload);
+  });
+
+  it("lets OneSystec give a device to a vehicle of a client, and nobody else; a read-only view cannot", async () => {
+    const VEHICLE = "33333333-3333-4333-8333-333333333333";
+    const DEVICE = "44444444-4444-4444-8444-444444444444";
+    const url = `/platform/organizations/${CLIENT_ORG}/vehicles/${VEHICLE}/device`;
+    mocks.assignDeviceToVehicle.mockResolvedValue({ id: VEHICLE, deviceId: DEVICE });
+    expect((await app.inject({ method: "PATCH", url, headers: as(CLIENT_ORG, "owner"), payload: { deviceId: DEVICE } })).statusCode).toBe(403);
+    expect(mocks.assignDeviceToVehicle).not.toHaveBeenCalled();
+    const ok = await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "owner", "platform-user"), payload: { deviceId: DEVICE } });
+    expect(ok.statusCode).toBe(200);
+    expect(mocks.assignDeviceToVehicle).toHaveBeenCalledWith(CLIENT_ORG, VEHICLE, DEVICE);
+    await app.inject({ method: "PATCH", url, headers: as(SAME_ORG, "owner", "platform-user"), payload: { deviceId: null } });
+    expect(mocks.assignDeviceToVehicle).toHaveBeenLastCalledWith(CLIENT_ORG, VEHICLE, null);
+    const viewing = { authorization: `Bearer ${app.jwt.sign({ userId: "platform-user", orgId: CLIENT_ORG, role: "admin", allowedArea: null, viewAs: true } as never)}` };
+    expect((await app.inject({ method: "PATCH", url, headers: viewing, payload: { deviceId: DEVICE } })).statusCode).toBe(403);
   });
 
   it("returns 404 for an unknown client and 400 for a malformed id", async () => {

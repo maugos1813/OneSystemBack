@@ -6,7 +6,7 @@ import { findUserById } from "../../services/auth.service.js";
 import { disableTotp } from "../../services/mfa.service.js";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { revokeAllUserSessions } from "../../services/userSession.service.js";
-import { createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
+import { AssignDeviceError, assignDeviceToVehicle, createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
 import { isUniqueViolation } from "../pgError.js";
 
@@ -48,6 +48,24 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
       const detail = await getOrganizationDetail(parsed.data);
       if (!detail) return reply.code(404).send({ error: "Organization not found" });
       return detail;
+    },
+  );
+
+  // OneSystec decides which device each vehicle of a client has (the client never assigns devices).
+  app.patch<{ Params: { id: string; vehicleId: string } }>(
+    "/platform/organizations/:id/vehicles/:vehicleId/device",
+    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Asignar (o quitar con null) el dispositivo de un vehículo de un cliente (solo OneSystec)", security: AUTH } },
+    async (request, reply) => {
+      const params = z.object({ id: z.string().uuid(), vehicleId: z.string().uuid() }).safeParse(request.params);
+      const body = z.object({ deviceId: z.string().uuid().nullable() }).safeParse(request.body);
+      if (!params.success || !body.success) return reply.code(400).send({ error: "Invalid request" });
+      if (request.user.viewAs) return reply.code(403).send({ error: "Estás viendo la cuenta de un cliente: es solo lectura" });
+      try {
+        return await assignDeviceToVehicle(params.data.id, params.data.vehicleId, body.data.deviceId);
+      } catch (err) {
+        if (err instanceof AssignDeviceError) return reply.code(err.status).send({ error: err.message });
+        throw err;
+      }
     },
   );
 
