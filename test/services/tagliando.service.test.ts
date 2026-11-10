@@ -52,7 +52,7 @@ beforeAll(async () => {
       odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz,
       km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz, odometer_base_day_km double precision,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
+    ); ALTER TABLE vehicles ADD COLUMN out_of_service boolean NOT NULL DEFAULT false; ALTER TABLE vehicles ADD COLUMN out_of_service_at timestamptz;
   `);
   for (const file of ["0017_maintenance.sql", "0029_vehicle_daily_km.sql"]) {
     const migration = readFileSync(new URL(`../../drizzle/${file}`, import.meta.url), "utf8");

@@ -22,7 +22,7 @@ beforeAll(async () => {
   await pg.exec(`
     CREATE TABLE organizations (id uuid PRIMARY KEY);
     CREATE TABLE users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, email varchar(255) NOT NULL, logo text, allowed_area varchar(50));
-    CREATE TABLE vehicles (id uuid PRIMARY KEY, org_id uuid NOT NULL, fleet_group varchar(50));
+    CREATE TABLE vehicles (id uuid PRIMARY KEY, org_id uuid NOT NULL, fleet_group varchar(50)); ALTER TABLE vehicles ADD COLUMN out_of_service boolean NOT NULL DEFAULT false; ALTER TABLE vehicles ADD COLUMN out_of_service_at timestamptz;
     CREATE TABLE fleets (org_id uuid NOT NULL, name varchar(50) NOT NULL, logo text, logo_tag text, created_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (org_id, name));
   `);
 });

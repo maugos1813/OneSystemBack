@@ -53,7 +53,7 @@ export async function updateVehicle(
   orgId: string,
   vehicleId: string,
   patch: Partial<
-    Pick<NewVehicle, "name" | "plate" | "deviceId" | "fleetGroup" | "brand" | "model" | "year" | "vin" | "fuelType" | "color" | "notes">
+    Pick<NewVehicle, "name" | "plate" | "deviceId" | "fleetGroup" | "brand" | "model" | "year" | "vin" | "fuelType" | "color" | "notes" | "outOfService" | "outOfServiceAt">
   >,
 ): Promise<Vehicle | undefined> {
   const [row] = await db

@@ -22,7 +22,7 @@ const METERS_PER_DEGREE = 111_320;
 
 beforeAll(async () => {
   await pg.exec(`
-    CREATE TABLE vehicles (id uuid PRIMARY KEY, org_id uuid NOT NULL DEFAULT gen_random_uuid(), name varchar(100) NOT NULL DEFAULT 'V', device_id uuid);
+    CREATE TABLE vehicles (id uuid PRIMARY KEY, org_id uuid NOT NULL DEFAULT gen_random_uuid(), name varchar(100) NOT NULL DEFAULT 'V', device_id uuid); ALTER TABLE vehicles ADD COLUMN out_of_service boolean NOT NULL DEFAULT false; ALTER TABLE vehicles ADD COLUMN out_of_service_at timestamptz;
     CREATE TABLE positions (
       id uuid NOT NULL DEFAULT gen_random_uuid(), device_id uuid NOT NULL, ts timestamptz NOT NULL, lat double precision NOT NULL,
       lng double precision NOT NULL, altitude integer NOT NULL DEFAULT 0, angle integer NOT NULL DEFAULT 0, satellites smallint,

@@ -28,7 +28,7 @@ const d = (day: number, hour = 12) => new Date(iso(day, hour));
 beforeAll(async () => {
   await pg.exec(`
     CREATE TABLE devices (id uuid PRIMARY KEY);
-    CREATE TABLE vehicles (id uuid PRIMARY KEY, org_id uuid, device_id uuid, created_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE vehicles (id uuid PRIMARY KEY, org_id uuid, device_id uuid, created_at timestamptz NOT NULL DEFAULT now()); ALTER TABLE vehicles ADD COLUMN out_of_service boolean NOT NULL DEFAULT false; ALTER TABLE vehicles ADD COLUMN out_of_service_at timestamptz;
     CREATE TABLE vehicle_device_assignments (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), vehicle_id uuid NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
       device_id uuid NOT NULL REFERENCES devices(id) ON DELETE CASCADE,

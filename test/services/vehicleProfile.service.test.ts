@@ -58,7 +58,7 @@ beforeAll(async () => {
       odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz,
       km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz, odometer_base_day_km double precision,
       created_at timestamptz NOT NULL DEFAULT now()
-    );
+    ); ALTER TABLE vehicles ADD COLUMN out_of_service boolean NOT NULL DEFAULT false; ALTER TABLE vehicles ADD COLUMN out_of_service_at timestamptz;
   `);
   // Which device a vehicle carried and when (the km are counted from the devices a vehicle carried).
   await pg.exec(`CREATE TABLE vehicle_device_assignments (

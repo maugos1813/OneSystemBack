@@ -235,6 +235,8 @@ export async function getPlatformFleet(): Promise<PlatformFleet> {
       kmFactor: 1,
       kmFactorAt: null,
       odometerBaseDayKm: null,
+      outOfService: false,
+      outOfServiceAt: null,
       createdAt: device.createdAt,
       orgName: client,
     });

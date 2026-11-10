@@ -43,7 +43,7 @@ beforeAll(async () => {
     CREATE TABLE vehicles (
       id uuid PRIMARY KEY, org_id uuid NOT NULL, name varchar(100) NOT NULL, plate varchar(20),
       fleet_group varchar(50), device_id uuid
-    );
+    ); ALTER TABLE vehicles ADD COLUMN out_of_service boolean NOT NULL DEFAULT false; ALTER TABLE vehicles ADD COLUMN out_of_service_at timestamptz;
   `);
 });
 

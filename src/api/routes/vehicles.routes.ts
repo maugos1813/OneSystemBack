@@ -43,6 +43,8 @@ const createSchema = z.object({
   fuelType: z.enum(FUEL_TYPES).nullable().optional(),
   color: profileText(30),
   notes: profileText(2000),
+  // Broken down: anyone who may edit the vehicle can switch it (the moment it was switched on is kept).
+  outOfService: z.boolean().optional(),
 });
 
 const odometerSchema = z.object({
@@ -193,7 +195,11 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
         }
       }
 
-      let vehicle = await updateVehicle(request.user.orgId, id, parsed.data);
+      const patch = {
+        ...parsed.data,
+        ...(parsed.data.outOfService === undefined ? {} : { outOfServiceAt: parsed.data.outOfService ? new Date() : null }),
+      };
+      let vehicle = await updateVehicle(request.user.orgId, id, patch);
       // OneSystec's overview lists the vehicles of every client: one that is not in its own organization is edited on the client
       // that owns it (and never with a device of another client). For anyone else it simply does not exist.
       if (!vehicle && !isClient(request) && !request.user.viewAs && (await isPlatformUser(request.user.userId))) {
@@ -202,7 +208,7 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
           if (parsed.data.deviceId && !(await deviceInOrg(elsewhere.orgId, parsed.data.deviceId))) {
             return reply.code(400).send({ error: "Ese dispositivo es de otro cliente: entrégaselo a este cliente primero" });
           }
-          vehicle = await updateVehicle(elsewhere.orgId, id, parsed.data);
+          vehicle = await updateVehicle(elsewhere.orgId, id, patch);
         }
       }
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });

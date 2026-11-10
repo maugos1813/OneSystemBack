@@ -28,7 +28,7 @@ beforeAll(async () => {
     CREATE TABLE vehicles (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, name varchar(100) NOT NULL, plate varchar(20),
       device_id uuid, fleet_group varchar(50), odometer_offset_km integer NOT NULL DEFAULT 0, brand varchar(50), model varchar(50), year integer, vin varchar(30), fuel_type varchar(20), color varchar(30), notes text, odometer_mode varchar(10) NOT NULL DEFAULT 'auto', odometer_base_km integer, odometer_base_at timestamptz, km_factor double precision NOT NULL DEFAULT 1, km_factor_at timestamptz, odometer_base_day_km double precision, created_at timestamptz NOT NULL DEFAULT now()
-    );
+    ); ALTER TABLE vehicles ADD COLUMN out_of_service boolean NOT NULL DEFAULT false; ALTER TABLE vehicles ADD COLUMN out_of_service_at timestamptz;
     CREATE TABLE vehicle_documents (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(), org_id uuid NOT NULL, vehicle_id uuid NOT NULL, kind varchar(30) NOT NULL,
       label varchar(100), expires_on date NOT NULL, remind_days integer NOT NULL DEFAULT 30, notes text,

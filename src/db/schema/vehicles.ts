@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { doublePrecision, integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, doublePrecision, integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { devices } from "./devices.js";
 import { organizations } from "./organizations.js";
 
@@ -39,6 +39,9 @@ export const vehicles = pgTable("vehicles", {
   // also holds the km before it, which the reading already includes). Kept once that day is over, while the positions that
   // say it are still stored; until then it is worked out live.
   odometerBaseDayKm: doublePrecision("odometer_base_day_km"),
+  // Broken down ("guasto"): switched on by the client from its vehicles, it puts a wrench over the vehicle's plate on the map.
+  outOfService: boolean("out_of_service").notNull().default(false),
+  outOfServiceAt: timestamp("out_of_service_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
