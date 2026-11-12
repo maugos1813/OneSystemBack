@@ -26,6 +26,7 @@ import { maintenanceRoutes } from "./routes/maintenance.routes.js";
 import { simsRoutes } from "./routes/sims.routes.js";
 import { fleetsRoutes } from "./routes/fleets.routes.js";
 import { platformRoutes } from "./routes/platform.routes.js";
+import { logPlatformAccess } from "../services/platform.service.js";
 import { teamUsersRoutes } from "./routes/teamUsers.routes.js";
 import { tollsRoutes } from "./routes/tolls.routes.js";
 import { vehiclesRoutes } from "./routes/vehicles.routes.js";
@@ -41,6 +42,14 @@ const app = Fastify({ loggerInstance: logger });
       "Referrer-Policy": "no-referrer",
       "Strict-Transport-Security": "max-age=15552000; includeSubDomains",
     });
+  });
+
+  // Every change made while OneSystec manages a client's account is written down: who, where, what.
+  app.addHook("onResponse", async (request, reply) => {
+    const user = request.user as { userId?: string; orgId?: string; actingAs?: boolean } | undefined;
+    if (!user?.actingAs || !user.userId || !user.orgId) return;
+    if (request.method === "GET" || request.method === "HEAD" || request.method === "OPTIONS" || reply.statusCode >= 400) return;
+    await logPlatformAccess(user.userId, user.orgId, "write", `${request.method} ${request.routeOptions?.url ?? request.url.split("?")[0]}`);
   });
 
   const corsOrigins = env.CORS_ORIGIN.split(",").map((origin) => origin.trim());

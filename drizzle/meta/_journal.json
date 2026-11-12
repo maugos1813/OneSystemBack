@@ -330,6 +330,13 @@
       "when": 1794324465372,
       "tag": "0046_vehicle_out_of_service",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794520431253,
+      "tag": "0047_platform_access_log",
+      "breakpoints": true
     }
   ]
 }

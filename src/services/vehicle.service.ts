@@ -31,12 +31,6 @@ export async function getVehicleForOrg(
   return row;
 }
 
-/** A vehicle of any client, found by its id alone: for OneSystec only, whose overview lists the vehicles of every client. */
-export async function getVehicleAnyOrg(vehicleId: string): Promise<Vehicle | undefined> {
-  const [row] = await db.select().from(vehicles).where(eq(vehicles.id, vehicleId)).limit(1);
-  return row;
-}
-
 /** Whether the device is one of this organization's. */
 export async function deviceInOrg(orgId: string, deviceId: string): Promise<boolean> {
   const [row] = await db.select({ id: devices.id }).from(devices).where(and(eq(devices.id, deviceId), eq(devices.orgId, orgId))).limit(1);

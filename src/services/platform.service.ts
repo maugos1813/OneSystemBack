@@ -1,6 +1,6 @@
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { devices, organizations, users, vehicles, type Device, type Position, type Vehicle } from "../db/schema/index.js";
+import { devices, organizations, platformAccessLog, users, vehicles, type Device, type Position, type Vehicle } from "../db/schema/index.js";
 import { env } from "../config/env.js";
 import { registerOrganizationWithOwner } from "./auth.service.js";
 import { setFleetLogo } from "./fleet.service.js";
@@ -133,6 +133,13 @@ export async function getOrganizationDetail(id: string): Promise<OrganizationDet
       .where(eq(vehicles.orgId, id))
       .orderBy(asc(vehicles.name)),
   };
+}
+
+/** The organization that owns a device or a vehicle, found by its id alone (OneSystec's overview shows every client's). */
+export async function owningOrgOf(kind: "device" | "vehicle", id: string): Promise<string | undefined> {
+  const table = kind === "device" ? devices : vehicles;
+  const [row] = await db.select({ orgId: table.orgId }).from(table).where(eq(table.id, id)).limit(1);
+  return row?.orgId ?? undefined;
 }
 
 export class AssignDeviceError extends Error {
@@ -281,4 +288,30 @@ export async function setOrganizationSections(id: string, sections: readonly str
 export async function setOrganizationLogo(id: string, logo: string | null, tag: string | null = null): Promise<{ id: string; logo: string | null } | undefined> {
   const [updated] = await db.update(organizations).set({ logo, logoTag: tag }).where(eq(organizations.id, id)).returning({ id: organizations.id, logo: organizations.logo });
   return updated;
+}
+
+/** Records that one of OneSystec's people opened a client's account ("view", "manage") or changed something in it ("write"). Never blocks what it records. */
+export async function logPlatformAccess(userId: string, orgId: string, action: "view" | "manage" | "write", detail?: string): Promise<void> {
+  try {
+    await db.insert(platformAccessLog).values({ userId, orgId, action, detail: detail?.slice(0, 200) ?? null });
+  } catch {
+    // The log is a safeguard, not a gate: if it cannot be written the person is not locked out of their own work.
+  }
+}
+
+/** The latest accesses to a client's account, newest first, with who made each one. */
+export async function listPlatformAccess(orgId: string, limit = 100) {
+  return db
+    .select({
+      id: platformAccessLog.id,
+      action: platformAccessLog.action,
+      detail: platformAccessLog.detail,
+      createdAt: platformAccessLog.createdAt,
+      userEmail: users.email,
+    })
+    .from(platformAccessLog)
+    .leftJoin(users, eq(users.id, platformAccessLog.userId))
+    .where(eq(platformAccessLog.orgId, orgId))
+    .orderBy(desc(platformAccessLog.createdAt))
+    .limit(limit);
 }

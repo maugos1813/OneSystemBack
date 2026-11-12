@@ -5,14 +5,12 @@ import {
   createVehicle,
   deleteVehicle,
   deviceInOrg,
-  getVehicleAnyOrg,
   getVehicleForOrg,
   listVehiclesForOrg,
   updateVehicle,
 } from "../../services/vehicle.service.js";
 import { getUserModules } from "../../services/userModules.service.js";
 import { getVehicleProfile, listVehicleOdometers, ProfileError, setVehicleOdometer } from "../../services/vehicleProfile.service.js";
-import { isPlatformUser } from "../../services/platform.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 
 const profileText = (max: number) =>
@@ -164,6 +162,10 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
         parsed.data.fleetGroup = request.user.allowedArea;
       }
 
+      if (parsed.data.deviceId && !(await deviceInOrg(request.user.orgId, parsed.data.deviceId))) {
+        return reply.code(400).send({ error: "Ese dispositivo no es de este cliente" });
+      }
+
       const vehicle = await createVehicle({ ...parsed.data, orgId: request.user.orgId });
       return reply.code(201).send(vehicle);
     },
@@ -199,18 +201,11 @@ export async function vehiclesRoutes(app: FastifyInstance): Promise<void> {
         ...parsed.data,
         ...(parsed.data.outOfService === undefined ? {} : { outOfServiceAt: parsed.data.outOfService ? new Date() : null }),
       };
-      let vehicle = await updateVehicle(request.user.orgId, id, patch);
-      // OneSystec's overview lists the vehicles of every client: one that is not in its own organization is edited on the client
-      // that owns it (and never with a device of another client). For anyone else it simply does not exist.
-      if (!vehicle && !isClient(request) && !request.user.viewAs && (await isPlatformUser(request.user.userId))) {
-        const elsewhere = await getVehicleAnyOrg(id);
-        if (elsewhere) {
-          if (parsed.data.deviceId && !(await deviceInOrg(elsewhere.orgId, parsed.data.deviceId))) {
-            return reply.code(400).send({ error: "Ese dispositivo es de otro cliente: entrégaselo a este cliente primero" });
-          }
-          vehicle = await updateVehicle(elsewhere.orgId, id, patch);
-        }
+      // The device must be one of this client's (for OneSystec the request is already carried out on the vehicle's own client).
+      if (parsed.data.deviceId && !(await deviceInOrg(request.user.orgId, parsed.data.deviceId))) {
+        return reply.code(400).send({ error: "Ese dispositivo es de otro cliente: entrégaselo a este cliente primero" });
       }
+      const vehicle = await updateVehicle(request.user.orgId, id, patch);
       if (!vehicle) return reply.code(404).send({ error: "Vehicle not found" });
       return vehicle;
     },

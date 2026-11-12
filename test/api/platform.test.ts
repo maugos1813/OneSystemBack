@@ -15,6 +15,11 @@ const mocks = vi.hoisted(() => ({
   setOrganizationSections: vi.fn(),
   setOrganizationLogo: vi.fn(),
 }));
+const vehicleMocks = vi.hoisted(() => ({ createVehicle: vi.fn(), deviceInOrg: vi.fn() }));
+vi.mock("../../src/services/vehicle.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/vehicle.service.js")>()),
+  ...vehicleMocks,
+}));
 const beacons = vi.hoisted(() => ({ createBeacon: vi.fn(), listRegisteredBeacons: vi.fn(), deleteBeacon: vi.fn() }));
 vi.mock("../../src/services/driverBeacon.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/driverBeacon.service.js")>()),
@@ -104,6 +109,21 @@ describe("cross-client administration is for one account alone", () => {
     expect(mocks.assignDeviceToVehicle).toHaveBeenLastCalledWith(CLIENT_ORG, VEHICLE, null);
     const viewing = { authorization: `Bearer ${app.jwt.sign({ userId: "platform-user", orgId: CLIENT_ORG, role: "admin", allowedArea: null, viewAs: true } as never)}` };
     expect((await app.inject({ method: "PATCH", url, headers: viewing, payload: { deviceId: DEVICE } })).statusCode).toBe(403);
+  });
+
+  it("lets OneSystec create a vehicle in a client's account, with a device of that client, and nobody else", async () => {
+    mocks.getOrganizationBrief.mockResolvedValue({ id: CLIENT_ORG, name: "Cliente" });
+    vehicleMocks.createVehicle.mockResolvedValue({ id: "v1" });
+    vehicleMocks.deviceInOrg.mockResolvedValue(true);
+    const url = `/platform/organizations/${CLIENT_ORG}/vehicles`;
+    const DEVICE = "44444444-4444-4444-8444-444444444444";
+    expect((await app.inject({ method: "POST", url, headers: as(CLIENT_ORG, "owner"), payload: { name: "Furgone" } })).statusCode).toBe(403);
+    expect(vehicleMocks.createVehicle).not.toHaveBeenCalled();
+    const ok = await app.inject({ method: "POST", url, headers: as(SAME_ORG, "owner", "platform-user"), payload: { name: "Furgone", plate: "AB123CD", deviceId: DEVICE } });
+    expect(ok.statusCode).toBe(201);
+    expect(vehicleMocks.createVehicle).toHaveBeenCalledWith(expect.objectContaining({ name: "Furgone", plate: "AB123CD", deviceId: DEVICE, orgId: CLIENT_ORG }));
+    vehicleMocks.deviceInOrg.mockResolvedValue(false);
+    expect((await app.inject({ method: "POST", url, headers: as(SAME_ORG, "owner", "platform-user"), payload: { name: "Otro", deviceId: DEVICE } })).statusCode).toBe(400);
   });
 
   it("returns 404 for an unknown client and 400 for a malformed id", async () => {

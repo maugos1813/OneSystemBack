@@ -491,7 +491,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (!me) return reply.code(404).send({ error: "User not found" });
       const isPlatform = await isPlatformUser(me.userId);
       // OneSystec looking at a client: the account answers as that client's, and says so.
-      if (request.user.viewAs && isPlatform) {
+      if ((request.user.viewAs || request.user.actingAs) && isPlatform) {
         const org = await getOrganizationBrief(request.user.orgId);
         if (org) {
           return {
@@ -502,6 +502,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
             orgLogo: org.logo,
             isPlatform,
             viewingAs: { orgId: org.id, orgName: org.name },
+            // Managing, not just looking: everything can be changed, and each change is logged.
+            ...(request.user.actingAs ? { managing: true } : {}),
           };
         }
       }

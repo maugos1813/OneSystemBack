@@ -167,7 +167,10 @@ describe("driver beacons", () => {
   });
 
   it("never mixes organizations", async () => {
+    // (OneSystec itself, the default account here, may look at any client's vehicle; a client may not.)
+    platform.users.delete(id(90));
     const res = await call("GET", `/vehicles/${VEHICLE.dhl}/driver?${RANGE}`, as("owner", null, OTHER_ORG));
+    platform.users.add(id(90));
     expect(res.statusCode).toBe(404);
     expect(((await call("GET", "/driver-beacons", as("owner", null, OTHER_ORG))).json() as unknown[]).length).toBe(0);
   });
@@ -227,7 +230,9 @@ describe("driver beacons", () => {
     });
 
     it("answers only for vehicles of the caller's área and the same organization", async () => {
+      platform.users.delete(id(90)); // OneSystec may look at any client's vehicle; a client may not
       expect((await call("GET", `/vehicles/${VEHICLE.dhl}/usage?${RANGE}`, as("owner", null, OTHER_ORG))).statusCode).toBe(404);
+      platform.users.add(id(90));
       expect((await call("GET", `/vehicles/${VEHICLE.piazza}/usage?${RANGE}`, as("client", "DHL"))).statusCode).toBe(404);
       expect((await call("GET", `/vehicles/${VEHICLE.dhl}/usage?from=${at(10)}&to=${at(0)}`, as("owner", null))).statusCode).toBe(400);
     });

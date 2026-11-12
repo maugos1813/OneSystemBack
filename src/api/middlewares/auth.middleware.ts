@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { isPlatformUser } from "../../services/platform.service.js";
+import { isPlatformUser, owningOrgOf } from "../../services/platform.service.js";
 import { authenticateApiKey, looksLikeApiKey } from "../../services/apiKey.service.js";
 import type { ModuleKey } from "../../services/modules.js";
 import { isSessionRevoked } from "../../services/userSession.service.js";
@@ -33,13 +33,13 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /** Refuses any change made with a view-only token. Called by every route that verifies a login token itself. */
 export async function rejectViewOnlyWrites(request: FastifyRequest, reply: FastifyReply): Promise<void> {
-  if (!request.user?.viewAs) return;
+  if (!request.user?.viewAs && !request.user?.actingAs) return;
   // The token is only good while its holder is still one of OneSystec's people.
   if (!(await isPlatformUser(request.user.userId))) {
     await reply.code(403).send({ error: "Forbidden" });
     return;
   }
-  if (!SAFE_METHODS.has(request.method)) {
+  if (request.user.viewAs && !SAFE_METHODS.has(request.method)) {
     await reply.code(403).send({ error: "Estás viendo la cuenta de un cliente: es solo lectura" });
   }
 }
@@ -87,6 +87,32 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     return;
   }
   await rejectViewOnlyWrites(request, reply);
+  if (reply.sent) return;
+  await scopeToOwningClient(request);
+}
+
+const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/**
+ * OneSystec's overview lists the vehicles and devices of every client, and the pages of one of them (its sheet, its profile, its
+ * maintenance, a command) all read it inside "the caller's organization". For OneSystec that is the client that owns it: when a
+ * request is about one vehicle or device (`/vehicles/:id…`, `/devices/:id…`) that belongs to another organization, and the caller is
+ * one of OneSystec's people, the request is carried out on that organization. Nobody else is affected: for anyone else a thing of
+ * another organization simply does not exist. A read-only look at a client's account (viewAs) is never widened this way.
+ */
+export async function scopeToOwningClient(request: FastifyRequest): Promise<void> {
+  const user = request.user;
+  if (!user || request.apiKeyId || user.viewAs || user.actingAs || user.allowedArea || (user.role !== "owner" && user.role !== "admin")) return;
+  const route = request.routeOptions?.url ?? "";
+  const kind = route.startsWith("/devices/:id") ? "device" : route.startsWith("/vehicles/:id") ? "vehicle" : null;
+  if (!kind) return;
+  const id = (request.params as { id?: string } | undefined)?.id;
+  if (!id || !UUID.test(id)) return;
+  // The caller's email is looked at first: for everyone but OneSystec's people nothing else is read.
+  if (!(await isPlatformUser(user.userId))) return;
+  const owner = await owningOrgOf(kind, id);
+  if (!owner || owner === user.orgId) return;
+  request.user = { ...user, orgId: owner };
 }
 
 /** For the public /v1 API: only API keys, never a login JWT. */

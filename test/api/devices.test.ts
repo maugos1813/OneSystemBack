@@ -17,6 +17,8 @@ vi.mock("../../src/services/device.service.js", async (importOriginal) => ({
 vi.mock("../../src/services/platform.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/platform.service.js")>()),
   isPlatformUser: async () => who.platform,
+  // The device or vehicle is always the caller's own in these tests: nothing is carried over to another client.
+  owningOrgOf: async () => undefined,
 }));
 
 vi.mock("../../src/services/deviceCommand.service.js", async (importOriginal) => ({

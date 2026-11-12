@@ -50,14 +50,15 @@ export async function registerRealtimeGateway(app: FastifyInstance): Promise<voi
     let sessionId: string | undefined;
     try {
       if (!token) throw new Error("missing token");
-      const payload = app.jwt.verify<{ userId: string; orgId: string; allowedArea?: string | null; viewAs?: boolean; sid?: string; exp?: number }>(token);
+      const payload = app.jwt.verify<{ userId: string; orgId: string; allowedArea?: string | null; viewAs?: boolean; actingAs?: boolean; sid?: string; exp?: number }>(token);
       if (!isHonouredLoginToken(payload as JwtPayload)) throw new Error("token no longer honoured");
       tokenExpiresAt = payload.exp! * 1000;
       sessionId = payload.sid;
       orgId = payload.orgId;
       allowedArea = payload.allowedArea;
       userId = payload.userId;
-      viewOnly = payload.viewAs === true;
+      viewOnly = payload.viewAs === true || payload.actingAs === true; // neither is OneSystec's own session: no all-clients channel
+      if (payload.actingAs === true && !(await isPlatformUser(payload.userId))) throw new Error("not OneSystec any more");
     } catch {
       socket.close(4001, "Unauthorized");
       return;

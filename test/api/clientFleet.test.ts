@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   updateVehicle: vi.fn(),
   deleteVehicle: vi.fn(),
   getVehicleForOrg: vi.fn(),
+  deviceInOrg: vi.fn(async () => true),
   listVehicleDocuments: vi.fn(),
   createDocument: vi.fn(),
 }));
@@ -22,6 +23,7 @@ vi.mock("../../src/services/vehicle.service.js", async (importOriginal) => ({
   updateVehicle: mocks.updateVehicle,
   deleteVehicle: mocks.deleteVehicle,
   getVehicleForOrg: mocks.getVehicleForOrg,
+  deviceInOrg: mocks.deviceInOrg,
 }));
 vi.mock("../../src/services/vehicleDocument.service.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/services/vehicleDocument.service.js")>()),

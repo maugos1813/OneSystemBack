@@ -2,11 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { createBeacon, deleteBeacon, DriverBeaconError, listRegisteredBeacons } from "../../services/driverBeacon.service.js";
+import { createVehicle, deviceInOrg } from "../../services/vehicle.service.js";
 import { findUserById } from "../../services/auth.service.js";
 import { disableTotp } from "../../services/mfa.service.js";
 import { logoSchema, logoTagSchema } from "../../services/orgLogo.js";
 import { revokeAllUserSessions } from "../../services/userSession.service.js";
-import { AssignDeviceError, assignDeviceToVehicle, createClientOrganization, getOrganizationBrief, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
+import { AssignDeviceError, assignDeviceToVehicle, createClientOrganization, getOrganizationBrief, listPlatformAccess, logPlatformAccess, getOrganizationDetail, getPlatformFleet, listOrganizations, setOrganizationLogo, setOrganizationSections, setUserLogo } from "../../services/platform.service.js";
 import { requireAuth, requirePlatform } from "../middlewares/auth.middleware.js";
 import { isUniqueViolation } from "../pgError.js";
 
@@ -69,6 +70,31 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
+  // OneSystec registers a vehicle straight in a client's account (and may give it a device of that client at once).
+  const vehicleBody = z.object({
+    name: z.string().trim().min(1).max(100),
+    plate: z.string().trim().max(20).optional(),
+    fleetGroup: z.string().trim().max(50).nullable().optional(),
+    deviceId: z.string().uuid().optional(),
+  });
+  app.post<{ Params: { id: string } }>(
+    "/platform/organizations/:id/vehicles",
+    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Crear un vehículo en la cuenta de un cliente (solo OneSystec)", security: AUTH } },
+    async (request, reply) => {
+      const id = z.string().uuid().safeParse(request.params.id);
+      const body = vehicleBody.safeParse(request.body);
+      if (!id.success) return reply.code(400).send({ error: "Invalid id" });
+      if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
+      if (request.user.viewAs) return reply.code(403).send({ error: "Estás viendo la cuenta de un cliente: es solo lectura" });
+      if (!(await getOrganizationBrief(id.data))) return reply.code(404).send({ error: "Organization not found" });
+      if (body.data.deviceId && !(await deviceInOrg(id.data, body.data.deviceId))) {
+        return reply.code(400).send({ error: "Ese dispositivo no es de este cliente: entrégaselo primero" });
+      }
+      const vehicle = await createVehicle({ ...body.data, plate: body.data.plate || undefined, orgId: id.data });
+      return reply.code(201).send(vehicle);
+    },
+  );
+
   // The EYE Beacons of a client: OneSystec hands them out (by the MAC on the label) and takes them back.
   const beaconParams = z.object({ id: z.string().uuid(), beaconId: z.string().uuid() });
   const beaconBody = z.object({ mac: z.string().trim().min(12).max(17), driverName: z.string().trim().min(1).max(100) });
@@ -120,22 +146,46 @@ export async function platformRoutes(app: FastifyInstance): Promise<void> {
   );
 
   // "See the client's map in one click": a short-lived token that carries the client's organization but only lets OneSystec read.
-  app.post<{ Params: { id: string } }>(
-    "/platform/organizations/:id/view",
-    {
-      ...PLATFORM,
-      schema: { tags: ["Platform"], summary: "Token de solo lectura para ver la cuenta de un cliente (solo OneSystec)", security: AUTH },
-    },
+  // "Manage the client's account": the same, but everything can be changed (each change is logged), for helping a client or setting it up.
+  for (const mode of ["view", "manage"] as const) {
+    app.post<{ Params: { id: string } }>(
+      `/platform/organizations/:id/${mode}`,
+      {
+        ...PLATFORM,
+        schema: {
+          tags: ["Platform"],
+          summary:
+            mode === "view"
+              ? "Token de solo lectura para ver la cuenta de un cliente (solo OneSystec)"
+              : "Token para gestionar la cuenta de un cliente, con permiso de escritura y registro de cada cambio (solo OneSystec)",
+          security: AUTH,
+        },
+      },
+      async (request, reply) => {
+        const parsed = z.string().uuid().safeParse(request.params.id);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid id" });
+        // One cannot open a client's account from inside another one: the way in is OneSystec's own session.
+        if (request.user.viewAs || request.user.actingAs) return reply.code(403).send({ error: "Forbidden" });
+        const org = await getOrganizationBrief(parsed.data);
+        if (!org) return reply.code(404).send({ error: "Organization not found" });
+        await logPlatformAccess(request.user.userId, org.id, mode);
+        const token = app.jwt.sign(
+          { userId: request.user.userId, orgId: org.id, role: "admin", allowedArea: null, ...(mode === "view" ? { viewAs: true } : { actingAs: true }) },
+          { expiresIn: "2h" },
+        );
+        return { token, orgId: org.id, orgName: org.name };
+      },
+    );
+  }
+
+  // Who of OneSystec went into this client's account, and what they changed there.
+  app.get<{ Params: { id: string } }>(
+    "/platform/organizations/:id/access-log",
+    { ...PLATFORM, schema: { tags: ["Platform"], summary: "Registro de accesos de OneSystec a la cuenta de un cliente (solo OneSystec)", security: AUTH } },
     async (request, reply) => {
       const parsed = z.string().uuid().safeParse(request.params.id);
       if (!parsed.success) return reply.code(400).send({ error: "Invalid id" });
-      const org = await getOrganizationBrief(parsed.data);
-      if (!org) return reply.code(404).send({ error: "Organization not found" });
-      const token = app.jwt.sign(
-        { userId: request.user.userId, orgId: org.id, role: "admin", allowedArea: null, viewAs: true },
-        { expiresIn: "2h" },
-      );
-      return { token, orgId: org.id, orgName: org.name };
+      return listPlatformAccess(parsed.data);
     },
   );
 
