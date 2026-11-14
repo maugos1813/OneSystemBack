@@ -25,6 +25,7 @@ import { pushTokensRoutes } from "./routes/pushTokens.routes.js";
 import { maintenanceRoutes } from "./routes/maintenance.routes.js";
 import { simsRoutes } from "./routes/sims.routes.js";
 import { fleetsRoutes } from "./routes/fleets.routes.js";
+import { oauthRoutes } from "./routes/oauth.routes.js";
 import { platformRoutes } from "./routes/platform.routes.js";
 import { logPlatformAccess } from "../services/platform.service.js";
 import { teamUsersRoutes } from "./routes/teamUsers.routes.js";
@@ -122,6 +123,7 @@ const app = Fastify({ loggerInstance: logger });
   await app.register(pushTokensRoutes);
   await app.register(driverVehiclesRoutes);
   await app.register(etaRoutes);
+  await app.register(oauthRoutes);
   await app.register(registerRealtimeGateway);
 
   app.get("/health", async () => ({ status: "ok" }));

@@ -337,6 +337,13 @@
       "when": 1794520431253,
       "tag": "0047_platform_access_log",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794694772777,
+      "tag": "0048_oauth_provider",
+      "breakpoints": true
     }
   ]
 }

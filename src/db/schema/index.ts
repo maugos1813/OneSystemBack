@@ -23,3 +23,4 @@ export * from "./fleets.js";
 export * from "./vehicleDeviceAssignments.js";
 export * from "./userSessions.js";
 export * from "./platformAccessLog.js";
+export * from "./oauth.js";
