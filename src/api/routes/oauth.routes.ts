@@ -188,7 +188,10 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const offered = await vehiclesOfferedBy(grant.userId);
     if (!offered) return reply.code(403).send({ error: "insufficient_permissions" });
     const picked = grant.vehicleIds === null ? null : new Set(grant.vehicleIds);
-    const vehicles = picked ? offered.filter((vehicle) => picked.has(vehicle.id)) : offered;
+    // A vehicle marked "out of service" (the wrench in OneTrack) is not usable, so an app that only wants the usable ones never gets it;
+    // it comes back by itself when the mark is taken off.
+    const chosen = picked ? offered.filter((vehicle) => picked.has(vehicle.id)) : offered;
+    const vehicles = chosen.filter((vehicle) => !vehicle.outOfService);
     const byDevice = await getLatestPositionsForDevices(vehicles.map((vehicle) => vehicle.deviceId!));
 
     const out: Array<{ plate: string; lat: number; lng: number; speed: number; ignition: boolean; heading: number; ts: string }> = [];
@@ -244,6 +247,7 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
             name: vehicle.name,
             fleetGroup: vehicle.fleetGroup,
             organization: orgNames.get(vehicle.orgId) ?? null,
+            outOfService: vehicle.outOfService,
             shared: picked === null || picked.has(vehicle.id),
           }))
           .sort((a, b) => a.plate.localeCompare(b.plate)),

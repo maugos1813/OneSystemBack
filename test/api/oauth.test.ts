@@ -348,6 +348,18 @@ describe("the positions of the fleet", () => {
     expect(rows.map((r) => r.plate).sort()).toEqual(["GA123BC", "GB456DE", "ZZ999ZZ"]);
   });
 
+  it("leaves out the vehicles marked out of service (the wrench) and brings them back when the mark is removed", async () => {
+    const { pair, code } = await authorizeAs(bearer(USER_A, ORG_A));
+    const token = (await exchange(code, pair)).json().access_token as string;
+    await pg.exec(`UPDATE vehicles SET out_of_service = true WHERE id = '${ID(12)}'`);
+    try {
+      expect(((await positions(token)).json() as Array<{ plate: string }>).map((r) => r.plate)).toEqual(["GA123BC"]);
+    } finally {
+      await pg.exec(`UPDATE vehicles SET out_of_service = false WHERE id = '${ID(12)}'`);
+    }
+    expect(((await positions(token)).json() as Array<{ plate: string }>).map((r) => r.plate).sort()).toEqual(["GA123BC", "GB456DE"]);
+  });
+
   it("respects the fleet of the person (a client limited to DHL sees only DHL)", async () => {
     const { pair, code } = await authorizeAs(bearer(USER_AREA, ORG_A, "viewer", "DHL"));
     const rows = (await positions((await exchange(code, pair)).json().access_token)).json() as Array<{ plate: string }>;
