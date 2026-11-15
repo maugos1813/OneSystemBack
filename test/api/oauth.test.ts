@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /** "Sign in with OneTrack" end to end against an in-memory Postgres, with the real migration. */
 
+process.env.PLATFORM_ADMIN_EMAILS = "plat@x.it";
+
 vi.mock("../../src/db/client.js", async () => {
   const schema = await import("../../src/db/schema/index.js");
   const pg = new PGlite();
@@ -22,6 +24,7 @@ const ORG_B = "00000000-0000-0000-0000-00000000000b";
 const USER_A = "00000000-0000-0000-0000-0000000000a1";
 const USER_AREA = "00000000-0000-0000-0000-0000000000a2";
 const USER_NOMAP = "00000000-0000-0000-0000-0000000000a3";
+const USER_PLATFORM = "00000000-0000-0000-0000-0000000000c1";
 const USER_B = "00000000-0000-0000-0000-0000000000b1";
 const REDIRECT = "https://app-piazza.vercel.app/mapa/onetrack/oauth";
 const REDIRECT_DEV = "http://localhost:5174/mapa/onetrack/oauth";
@@ -84,7 +87,8 @@ beforeAll(async () => {
       ('${USER_A}', '${ORG_A}', 'a@x.it', 'x', 'owner', NULL, NULL),
       ('${USER_AREA}', '${ORG_A}', 'area@x.it', 'x', 'viewer', 'DHL', '{mapa,vehiculos}'),
       ('${USER_NOMAP}', '${ORG_A}', 'nomap@x.it', 'x', 'viewer', NULL, '{alertas}'),
-      ('${USER_B}', '${ORG_B}', 'b@x.it', 'x', 'owner', NULL, NULL);
+      ('${USER_B}', '${ORG_B}', 'b@x.it', 'x', 'owner', NULL, NULL),
+      ('${USER_PLATFORM}', '${ORG_B}', 'plat@x.it', 'x', 'owner', NULL, NULL);
     INSERT INTO devices (id, org_id, imei) VALUES
       ('${ID(1)}', '${ORG_A}', '350000000000001'), ('${ID(2)}', '${ORG_A}', '350000000000002'), ('${ID(3)}', '${ORG_A}', '350000000000003'),
       ('${ID(4)}', '${ORG_A}', '350000000000004'), ('${ID(5)}', '${ORG_B}', '350000000000005');
@@ -335,6 +339,12 @@ describe("the positions of the fleet", () => {
     const { pair, code } = await authorizeAs(bearer(USER_B, ORG_B));
     const rows = (await positions((await exchange(code, pair)).json().access_token)).json() as Array<{ plate: string }>;
     expect(rows.map((r) => r.plate)).toEqual(["ZZ999ZZ"]);
+  });
+
+  it("gives OneSystec's own people the vehicles of every client (the platform owns the hardware)", async () => {
+    const { pair, code } = await authorizeAs(bearer(USER_PLATFORM, ORG_B));
+    const rows = (await positions((await exchange(code, pair)).json().access_token)).json() as Array<{ plate: string }>;
+    expect(rows.map((r) => r.plate).sort()).toEqual(["GA123BC", "GB456DE", "ZZ999ZZ"]);
   });
 
   it("respects the fleet of the person (a client limited to DHL sees only DHL)", async () => {

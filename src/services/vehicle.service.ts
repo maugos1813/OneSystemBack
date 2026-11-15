@@ -16,6 +16,11 @@ export async function listVehiclesForOrg(orgId: string, allowedArea?: string | n
     .where(and(...conditions));
 }
 
+/** Every vehicle of every client: only for OneSystec's own people (the platform owns the hardware and sees all of it). */
+export async function listAllVehicles(): Promise<Vehicle[]> {
+  return db.select().from(vehicles);
+}
+
 export async function getVehicleForOrg(
   orgId: string,
   vehicleId: string,

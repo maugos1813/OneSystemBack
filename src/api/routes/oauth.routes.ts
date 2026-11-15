@@ -17,7 +17,8 @@ import {
   type AuthorizeCheck,
 } from "../../services/oauth.service.js";
 import { getLatestPositionsForDevices } from "../../services/position.service.js";
-import { listVehiclesForOrg } from "../../services/vehicle.service.js";
+import { isPlatformUser } from "../../services/platform.service.js";
+import { listAllVehicles, listVehiclesForOrg } from "../../services/vehicle.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { clientAddress } from "../middlewares/loginRateLimit.js";
 import { FixedWindowLimiter } from "../middlewares/rateLimit.js";
@@ -170,7 +171,10 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     // they have one, and only if their account includes the map.
     const user = await getCurrentUser(grant.userId);
     if (!user || !user.modules.includes("mapa")) return reply.code(403).send({ error: "insufficient_permissions" });
-    const vehicles = (await listVehiclesForOrg(user.orgId, user.allowedArea)).filter((vehicle) => vehicle.plate && vehicle.deviceId);
+    // OneSystec's own people (by email, as everywhere else) see every device of every client in OneTrack, so what they connect sees them
+    // all too: the platform owns the hardware. Anyone else gets their company, and their fleet if they have one.
+    const all = (await isPlatformUser(grant.userId)) ? await listAllVehicles() : await listVehiclesForOrg(user.orgId, user.allowedArea);
+    const vehicles = all.filter((vehicle) => vehicle.plate && vehicle.deviceId);
     const byDevice = await getLatestPositionsForDevices(vehicles.map((vehicle) => vehicle.deviceId!));
 
     const out: Array<{ plate: string; lat: number; lng: number; speed: number; ignition: boolean; heading: number; ts: string }> = [];
