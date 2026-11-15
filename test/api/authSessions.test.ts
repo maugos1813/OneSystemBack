@@ -119,7 +119,7 @@ describe("a session that expires and renews", () => {
 
     const list = (await get("/auth/sessions", session.token)).json() as Array<{ id: string; client: string; current: boolean; device: string }>;
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ id: session.sessionId, client: "app", current: true, device: "App OneSystec" });
+    expect(list[0]).toMatchObject({ id: session.sessionId, client: "app", current: true, device: "App OneTrack" });
   });
 
   it("never stores the refresh secret, only its hash", async () => {

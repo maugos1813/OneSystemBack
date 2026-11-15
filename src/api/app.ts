@@ -68,9 +68,9 @@ const app = Fastify({ loggerInstance: logger });
     openapi: {
       openapi: "3.0.0",
       info: {
-        title: "OneSystec API",
+        title: "OneTrack API",
         description:
-          "API interna de la app OneSystec (sesión de usuario). Todos los datos quedan aislados por " +
+          "API interna de la app OneTrack (sesión de usuario). Todos los datos quedan aislados por " +
           "organización. Para integrar otras apps usá la API pública de solo lectura: /v1/docs.",
         version: "1.0.0",
       },
@@ -83,7 +83,7 @@ const app = Fastify({ loggerInstance: logger });
         { name: "Positions", description: "Posiciones e histórico de recorrido" },
         { name: "Settings", description: "Nombre de la organización, horario laboral y preferencias de alertas" },
         { name: "Geofences", description: "Geocercas circulares para alertas de entrada/salida" },
-        { name: "Products", description: "Catálogo de productos OneSystec habilitados por organización" },
+        { name: "Products", description: "Catálogo de productos OneTrack habilitados por organización" },
         { name: "Team", description: "Miembros de la organización: roles y qué cards puede ver cada uno" },
         { name: "SIMs", description: "Tarjetas SIM de los trackers (ICCID, número, NMU, PIN/PUK); solo owner/admin" },
         { name: "Tolls", description: "Pasos de los vehículos por peajes, detectados a partir de su recorrido" },

@@ -8,7 +8,7 @@ import { generateTotpSecret, otpauthUri, verifyTotp } from "./totp.js";
 import { isEmailCodeLoginAvailable } from "./emailCode.service.js";
 import { hashSecret } from "./userSession.service.js";
 
-export const TOTP_ISSUER = "OneSystec";
+export const TOTP_ISSUER = "OneTrack";
 const RECOVERY_CODE_COUNT = 10;
 const RECOVERY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I: they get read out and copied by hand
 

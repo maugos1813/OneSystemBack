@@ -166,7 +166,7 @@ export function securityDigestPushMessage(messages: readonly string[]): PushMess
   return {
     title: `Resumen de seguridad OneSystec (${messages.length})`,
     body: rest > 0 ? `${shown}\n+${rest} más` : shown,
-    data: { url: "/clientes", org: "OneSystec" },
+    data: { url: "/clienti", org: "OneSystec" },
   };
 }
 

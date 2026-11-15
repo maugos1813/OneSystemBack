@@ -118,14 +118,14 @@ export async function sendAlertDigest(to: string, orgName: string, alerts: Alert
 
 const LOGIN_CODE_COPY: Record<Language, { subject: (code: string) => string; heading: string; body: string; expires: string; ignore: string }> = {
   es: {
-    subject: (code) => `${code} es tu código de acceso a OneSystec`,
+    subject: (code) => `${code} es tu código de acceso a OneTrack`,
     heading: "Tu código de acceso",
     body: "Escribe este código en la pantalla de inicio de sesión:",
     expires: "Vence en 10 minutos y sirve una sola vez.",
     ignore: "Si no intentaste entrar, ignora este correo y cambia tu contraseña: alguien la conoce.",
   },
   it: {
-    subject: (code) => `${code} è il tuo codice di accesso a OneSystec`,
+    subject: (code) => `${code} è il tuo codice di accesso a OneTrack`,
     heading: "Il tuo codice di accesso",
     body: "Inserisci questo codice nella schermata di accesso:",
     expires: "Scade tra 10 minuti e vale una sola volta.",

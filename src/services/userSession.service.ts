@@ -80,8 +80,7 @@ export function describeDevice(userAgent: string | undefined, client: SessionCli
             ? "Linux"
             : "";
   if (client === "app") {
-    const app = /OneTrackApp/i.test(ua) ? "App OneTrack" : "App OneSystec";
-    return os ? `${app} · ${os}` : app;
+    return os ? `App OneTrack · ${os}` : "App OneTrack";
   }
   const browser = /Edg\//.test(ua)
     ? "Edge"

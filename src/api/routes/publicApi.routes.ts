@@ -195,7 +195,7 @@ const DOCS_HTML = `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>OneSystec API v1</title>
+    <title>OneTrack API v1</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css" />
   </head>
   <body>
@@ -214,7 +214,7 @@ export async function publicApiRoutes(app: FastifyInstance): Promise<void> {
     openapi: {
       openapi: "3.0.0",
       info: {
-        title: "OneSystec API v1 (solo lectura)",
+        title: "OneTrack API v1 (solo lectura)",
         description:
           "Datos de los vehículos de tu organización para integrarlos en otras apps. **Solo lectura**: " +
           "no existe ninguna operación que cree, modifique o borre datos. Autenticación con una API key " +
