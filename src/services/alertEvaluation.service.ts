@@ -67,11 +67,23 @@ const WEEKDAY_ORDER: Array<keyof WorkingHours> = [
   "saturday",
 ];
 
-function isAfterHours(date: Date, workingHours: WorkingHours): boolean {
-  const day = WEEKDAY_ORDER[date.getDay()]!;
+/** Working hours are the fleet's wall clock (Italy, summer/winter time included), not the clock of the server (UTC on Railway). */
+const WORKING_HOURS_ZONE = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Europe/Rome",
+  weekday: "short",
+  hour: "numeric",
+  minute: "numeric",
+  hourCycle: "h23",
+});
+const SHORT_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+export function isAfterHours(date: Date, workingHours: WorkingHours): boolean {
+  const parts = WORKING_HOURS_ZONE.formatToParts(date);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "0";
+  const day = WEEKDAY_ORDER[Math.max(0, SHORT_WEEKDAYS.indexOf(part("weekday")))]!;
   const config = workingHours[day];
   if (!config.enabled) return true;
-  const minutes = date.getHours() * 60 + date.getMinutes();
+  const minutes = (Number(part("hour")) % 24) * 60 + Number(part("minute"));
   const [startH, startM] = config.start.split(":").map(Number);
   const [endH, endM] = config.end.split(":").map(Number);
   const startMinutes = (startH ?? 0) * 60 + (startM ?? 0);
