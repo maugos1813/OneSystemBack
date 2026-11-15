@@ -344,6 +344,13 @@
       "when": 1794694772777,
       "tag": "0048_oauth_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1794773713233,
+      "tag": "0049_oauth_grant_vehicles",
+      "breakpoints": true
     }
   ]
 }

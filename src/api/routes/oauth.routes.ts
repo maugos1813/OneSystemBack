@@ -7,17 +7,21 @@ import {
   checkAuthorizeRequest,
   exchangeAuthorizationCode,
   issueAuthorizationCode,
+  getConnectionVehicleIds,
   listConnections,
   OAuthError,
   recordDenied,
   refreshAccessToken,
   revokeConnection,
   revokeToken,
+  setConnectionVehicleIds,
   SCOPE_VEHICLES_READ,
   type AuthorizeCheck,
 } from "../../services/oauth.service.js";
 import { getLatestPositionsForDevices } from "../../services/position.service.js";
 import { isPlatformUser } from "../../services/platform.service.js";
+import { db } from "../../db/client.js";
+import { organizations, type Vehicle } from "../../db/schema/index.js";
 import { listAllVehicles, listVehiclesForOrg } from "../../services/vehicle.service.js";
 import { requireAuth } from "../middlewares/auth.middleware.js";
 import { clientAddress } from "../middlewares/loginRateLimit.js";
@@ -61,6 +65,18 @@ function backToApp(redirectUri: string, state: string | null, params: Record<str
 }
 
 const bodyOf = (request: FastifyRequest): Record<string, unknown> => (request.body && typeof request.body === "object" ? (request.body as Record<string, unknown>) : {});
+
+/**
+ * The vehicles a person can offer to an app: the ones they see in OneTrack, as it is NOW, that have a plate and a tracker. OneSystec's own
+ * people (by email, as everywhere else) see every device of every client in OneTrack, so they can offer any of them: the platform owns the
+ * hardware. Anyone else gets their company, and their fleet if they have one. Null when the account does not include the map.
+ */
+async function vehiclesOfferedBy(userId: string): Promise<Vehicle[] | null> {
+  const user = await getCurrentUser(userId);
+  if (!user || !user.modules.includes("mapa")) return null;
+  const all = (await isPlatformUser(userId)) ? await listAllVehicles() : await listVehiclesForOrg(user.orgId, user.allowedArea);
+  return all.filter((vehicle) => vehicle.plate && vehicle.deviceId);
+}
 
 export async function oauthRoutes(app: FastifyInstance): Promise<void> {
   // The token and revoke endpoints receive application/x-www-form-urlencoded (RFC 6749): parsed here, for this plugin only.
@@ -167,14 +183,12 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     const gate = limits.positionsByGrant.hit(grant.grantId);
     if (!gate.allowed) return tooMany(reply, gate.retryAfterSec);
 
-    // What the person sees in OneTrack, as it is NOW (their permissions can change after they authorized): their company, their fleet if
-    // they have one, and only if their account includes the map.
-    const user = await getCurrentUser(grant.userId);
-    if (!user || !user.modules.includes("mapa")) return reply.code(403).send({ error: "insufficient_permissions" });
-    // OneSystec's own people (by email, as everywhere else) see every device of every client in OneTrack, so what they connect sees them
-    // all too: the platform owns the hardware. Anyone else gets their company, and their fleet if they have one.
-    const all = (await isPlatformUser(grant.userId)) ? await listAllVehicles() : await listVehiclesForOrg(user.orgId, user.allowedArea);
-    const vehicles = all.filter((vehicle) => vehicle.plate && vehicle.deviceId);
+    // What the person offers, as it is NOW (their permissions can change after they authorized), narrowed to the vehicles they picked for
+    // this app when they picked some (a vehicle they stopped seeing never comes back through the list).
+    const offered = await vehiclesOfferedBy(grant.userId);
+    if (!offered) return reply.code(403).send({ error: "insufficient_permissions" });
+    const picked = grant.vehicleIds === null ? null : new Set(grant.vehicleIds);
+    const vehicles = picked ? offered.filter((vehicle) => picked.has(vehicle.id)) : offered;
     const byDevice = await getLatestPositionsForDevices(vehicles.map((vehicle) => vehicle.deviceId!));
 
     const out: Array<{ plate: string; lat: number; lng: number; speed: number; ignition: boolean; heading: number; ts: string }> = [];
@@ -204,6 +218,56 @@ export async function oauthRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       if (request.apiKeyId || request.user.viewAs) return reply.code(403).send({ error: "forbidden" });
       return listConnections(request.user.userId);
+    },
+  );
+
+  // Which vehicles an app sees: the ones the person can offer, each marked if it is shared; `all` means "every one I see" (new vehicles
+  // included). Once the person picks, a vehicle added later is NOT shared until they pick it.
+  app.get<{ Params: { id: string } }>(
+    "/oauth/connections/:id/vehicles",
+    { onRequest: requireAuth, schema: { tags: ["OAuth"], summary: "Vehículos que ve una aplicación conectada", security: [{ bearerAuth: [] }] } },
+    async (request, reply) => {
+      if (request.apiKeyId || request.user.viewAs) return reply.code(403).send({ error: "forbidden" });
+      const id = z.string().uuid().safeParse(request.params.id);
+      if (!id.success) return reply.code(400).send({ error: "invalid_request" });
+      const shared = await getConnectionVehicleIds(request.user.userId, id.data);
+      if (shared === undefined) return reply.code(404).send({ error: "not_found" });
+      const offered = (await vehiclesOfferedBy(request.user.userId)) ?? [];
+      const orgNames = new Map((await db.select({ id: organizations.id, name: organizations.name }).from(organizations)).map((org) => [org.id, org.name]));
+      const picked = shared === null ? null : new Set(shared);
+      return {
+        all: shared === null,
+        vehicles: offered
+          .map((vehicle) => ({
+            id: vehicle.id,
+            plate: vehicle.plate!,
+            name: vehicle.name,
+            fleetGroup: vehicle.fleetGroup,
+            organization: orgNames.get(vehicle.orgId) ?? null,
+            shared: picked === null || picked.has(vehicle.id),
+          }))
+          .sort((a, b) => a.plate.localeCompare(b.plate)),
+      };
+    },
+  );
+
+  app.put<{ Params: { id: string } }>(
+    "/oauth/connections/:id/vehicles",
+    { onRequest: requireAuth, schema: { tags: ["OAuth"], summary: "Elegir qué vehículos ve una aplicación conectada", security: [{ bearerAuth: [] }] } },
+    async (request, reply) => {
+      if (request.apiKeyId || request.user.viewAs) return reply.code(403).send({ error: "forbidden" });
+      const id = z.string().uuid().safeParse(request.params.id);
+      const body = z.object({ vehicleIds: z.array(z.string().uuid()).max(5000).nullable() }).safeParse(request.body);
+      if (!id.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+      let vehicleIds: string[] | null = null;
+      if (body.data.vehicleIds !== null) {
+        // Only vehicles the person can offer: nobody can share what they do not see.
+        const offered = new Set(((await vehiclesOfferedBy(request.user.userId)) ?? []).map((vehicle) => vehicle.id));
+        vehicleIds = [...new Set(body.data.vehicleIds)];
+        if (vehicleIds.some((vehicleId) => !offered.has(vehicleId))) return reply.code(400).send({ error: "invalid_vehicle" });
+      }
+      const saved = await setConnectionVehicleIds(request.user.userId, id.data, vehicleIds);
+      return saved ? reply.code(204).send() : reply.code(404).send({ error: "not_found" });
     },
   );
 

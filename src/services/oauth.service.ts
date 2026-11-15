@@ -316,6 +316,8 @@ export interface AccessGrant {
   grantId: string;
   scope: string;
   clientId: string;
+  /** The vehicles the person chose to share with this app; null = all of the ones they see. */
+  vehicleIds: string[] | null;
 }
 
 /** The connection behind an access token, or null when it is unknown, expired or revoked. */
@@ -330,7 +332,7 @@ export async function authenticateAccessToken(token: string, now: Date = new Dat
     .limit(1);
   if (!row || row.token.revokedAt || row.grant.revokedAt || !row.clientActive) return null;
   if (row.token.accessExpiresAt.getTime() <= now.getTime()) return null;
-  return { userId: row.grant.userId, grantId: row.grant.id, scope: row.grant.scope, clientId: row.clientId };
+  return { userId: row.grant.userId, grantId: row.grant.id, scope: row.grant.scope, clientId: row.clientId, vehicleIds: row.grant.vehicleIds };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -341,15 +343,52 @@ export interface Connection {
   clientName: string;
   scope: string;
   connectedAt: Date;
+  /** null = every vehicle the person sees; otherwise how many they picked. */
+  sharedVehicles: number | null;
 }
 
 export async function listConnections(userId: string): Promise<Connection[]> {
-  return db
-    .select({ id: oauthGrants.id, clientName: oauthClients.name, scope: oauthGrants.scope, connectedAt: oauthGrants.createdAt })
+  const rows = await db
+    .select({
+      id: oauthGrants.id,
+      clientName: oauthClients.name,
+      scope: oauthGrants.scope,
+      connectedAt: oauthGrants.createdAt,
+      vehicleIds: oauthGrants.vehicleIds,
+    })
     .from(oauthGrants)
     .innerJoin(oauthClients, eq(oauthGrants.clientId, oauthClients.id))
     .where(and(eq(oauthGrants.userId, userId), isNull(oauthGrants.revokedAt)))
     .orderBy(desc(oauthGrants.createdAt));
+  return rows.map(({ vehicleIds, ...row }) => ({ ...row, sharedVehicles: vehicleIds === null ? null : vehicleIds.length }));
+}
+
+/** The vehicles shared with one of the person's connections: null = all of the ones they see. Undefined when it is not theirs. */
+export async function getConnectionVehicleIds(userId: string, grantId: string): Promise<string[] | null | undefined> {
+  const [grant] = await db
+    .select({ vehicleIds: oauthGrants.vehicleIds })
+    .from(oauthGrants)
+    .where(and(eq(oauthGrants.id, grantId), eq(oauthGrants.userId, userId), isNull(oauthGrants.revokedAt)))
+    .limit(1);
+  return grant ? grant.vehicleIds : undefined;
+}
+
+/** The person chooses which vehicles an app sees (null = all of the ones they see). False when the connection is not theirs. */
+export async function setConnectionVehicleIds(userId: string, grantId: string, vehicleIds: string[] | null): Promise<boolean> {
+  const updated = await db
+    .update(oauthGrants)
+    .set({ vehicleIds })
+    .where(and(eq(oauthGrants.id, grantId), eq(oauthGrants.userId, userId), isNull(oauthGrants.revokedAt)))
+    .returning({ id: oauthGrants.id });
+  if (updated.length === 0) return false;
+  const [client] = await db
+    .select({ clientId: oauthClients.clientId })
+    .from(oauthGrants)
+    .innerJoin(oauthClients, eq(oauthGrants.clientId, oauthClients.id))
+    .where(eq(oauthGrants.id, grantId))
+    .limit(1);
+  await audit("vehicles_selected", userId, client?.clientId ?? null, vehicleIds === null ? "all vehicles" : `${vehicleIds.length} vehicles`);
+  return true;
 }
 
 /** The person disconnects an app. False when it is not theirs (or already gone). */

@@ -32,6 +32,8 @@ export const oauthGrants = pgTable(
       .notNull()
       .references(() => oauthClients.id, { onDelete: "cascade" }),
     scope: varchar("scope", { length: 200 }).notNull(),
+    /** The vehicles the person chose to share with this app. NULL = every vehicle they see (the default); a list = only those. */
+    vehicleIds: uuid("vehicle_ids").array(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
   },

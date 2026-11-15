@@ -79,7 +79,8 @@ beforeAll(async () => {
     CREATE TABLE positions (id uuid NOT NULL DEFAULT gen_random_uuid(), device_id uuid NOT NULL, ts timestamptz NOT NULL, lat double precision NOT NULL, lng double precision NOT NULL, altitude integer NOT NULL DEFAULT 0, angle integer NOT NULL DEFAULT 0, satellites smallint, speed integer NOT NULL DEFAULT 0, priority smallint NOT NULL DEFAULT 0, io_data jsonb NOT NULL DEFAULT '{}', PRIMARY KEY (id, ts));
   `);
   // The REAL migration of the OAuth tables.
-  for (const statement of readFileSync("drizzle/0048_oauth_provider.sql", "utf8").split("--> statement-breakpoint")) await pg.exec(statement);
+  for (const file of ["0048_oauth_provider", "0049_oauth_grant_vehicles"])
+    for (const statement of readFileSync(`drizzle/${file}.sql`, "utf8").split("--> statement-breakpoint")) await pg.exec(statement);
 
   await pg.exec(`
     INSERT INTO organizations (id, name) VALUES ('${ORG_A}', 'Gamonal Trasporti'), ('${ORG_B}', 'Altra Azienda');
@@ -378,6 +379,71 @@ describe("the positions of the fleet", () => {
     const token = (await exchange(code, pair)).json().access_token as string;
     expect(await oauth.authenticateAccessToken(token)).not.toBeNull();
     expect(await oauth.authenticateAccessToken(token, new Date(Date.now() + 61 * 60_000))).toBeNull();
+  });
+});
+
+describe("choosing which vehicles an app sees", () => {
+  const connect = async (headers: Record<string, string>) => {
+    const { pair, code } = await authorizeAs(headers);
+    const token = (await exchange(code, pair)).json().access_token as string;
+    const list = await app.inject({ method: "GET", url: "/oauth/connections", headers });
+    const id = (list.json() as Array<{ id: string }>)[0]!.id;
+    return { token, id };
+  };
+  const plates = async (token: string) => ((await positions(token)).json() as Array<{ plate: string }>).map((r) => r.plate).sort();
+  const put = (id: string, headers: Record<string, string>, vehicleIds: string[] | null) =>
+    app.inject({ method: "PUT", url: `/oauth/connections/${id}/vehicles`, headers, payload: { vehicleIds } });
+
+  it("shares everything by default and lists what the person can offer, each one marked", async () => {
+    const headers = bearer(USER_PLATFORM, ORG_B);
+    const { id } = await connect(headers);
+    const res = await app.inject({ method: "GET", url: `/oauth/connections/${id}/vehicles`, headers });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { all: boolean; vehicles: Array<{ plate: string; shared: boolean; organization: string }> };
+    expect(body.all).toBe(true);
+    expect(body.vehicles.map((v) => v.plate)).toEqual(["GA123BC", "GB456DE", "GC789FG", "ZZ999ZZ"]);
+    expect(body.vehicles.every((v) => v.shared)).toBe(true);
+    expect(body.vehicles.find((v) => v.plate === "ZZ999ZZ")!.organization).toBe("Altra Azienda");
+  });
+
+  it("makes the app see only the vehicles the person picked, and goes back to all with null", async () => {
+    const headers = bearer(USER_PLATFORM, ORG_B);
+    const { token, id } = await connect(headers);
+    expect((await put(id, headers, [ID(11), ID(15)])).statusCode).toBe(204);
+    expect(await plates(token)).toEqual(["GA123BC", "ZZ999ZZ"]);
+
+    const list = (await app.inject({ method: "GET", url: `/oauth/connections/${id}/vehicles`, headers })).json() as { all: boolean; vehicles: Array<{ plate: string; shared: boolean }> };
+    expect(list.all).toBe(false);
+    expect(list.vehicles.filter((v) => v.shared).map((v) => v.plate)).toEqual(["GA123BC", "ZZ999ZZ"]);
+    const connections = (await app.inject({ method: "GET", url: "/oauth/connections", headers })).json() as Array<{ sharedVehicles: number | null }>;
+    expect(connections[0]!.sharedVehicles).toBe(2);
+
+    expect((await put(id, headers, null)).statusCode).toBe(204);
+    expect(await plates(token)).toEqual(["GA123BC", "GB456DE", "ZZ999ZZ"]);
+  });
+
+  it("can share none at all", async () => {
+    const headers = bearer(USER_PLATFORM, ORG_B);
+    const { token, id } = await connect(headers);
+    expect((await put(id, headers, [])).statusCode).toBe(204);
+    expect(await plates(token)).toEqual([]);
+  });
+
+  it("refuses to share a vehicle the person does not see, or a connection that is not theirs", async () => {
+    const headers = bearer(USER_A, ORG_A);
+    const { token, id } = await connect(headers);
+    expect((await put(id, headers, [ID(15)])).statusCode).toBe(400); // ZZ999ZZ belongs to another company
+    expect((await put(id, headers, ["not-an-id"])).statusCode).toBe(400);
+    expect(await plates(token)).toEqual(["GA123BC", "GB456DE"]); // nothing changed
+    expect((await put(id, bearer(USER_B, ORG_B), [ID(15)])).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/oauth/connections/${id}/vehicles`, headers: bearer(USER_B, ORG_B) })).statusCode).toBe(404);
+  });
+
+  it("is only for the person themselves: not an API key, not someone looking at a client's account", async () => {
+    const { id } = await connect(bearer(USER_A, ORG_A));
+    const viewing = { authorization: `Bearer ${app.jwt.sign({ userId: USER_A, orgId: ORG_A, role: "owner", allowedArea: null, viewAs: { orgId: ORG_B } } as never)}` };
+    expect((await put(id, viewing, [ID(11)])).statusCode).toBe(403);
+    expect((await put(id, {}, [ID(11)])).statusCode).toBe(401);
   });
 });
 
