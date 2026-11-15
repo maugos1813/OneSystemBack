@@ -5,6 +5,12 @@ import { DEFAULT_LANGUAGE, pick, type Language, type Localized } from "./i18n.js
 
 const resend = env.RESEND_API_KEY ? new Resend(env.RESEND_API_KEY) : null;
 
+/** Whatever name the configured sender carries ("OneSystec <x@y>"), mail from the product goes out as OneTrack: only the address is kept. */
+function fromOneTrack(configured: string): string {
+  const address = /<([^>]+)>/.exec(configured)?.[1] ?? configured.trim();
+  return `OneTrack <${address}>`;
+}
+
 /** The frontend's own origin, for the "ver en la app" link and the logo — reuses
  * CORS_ORIGIN, which in production lists localhost dev origins before the deployed one,
  * so a non-local origin is preferred when there is one. */
@@ -106,7 +112,7 @@ export async function sendAlertDigest(to: string, orgName: string, alerts: Alert
 
   try {
     await resend.emails.send({
-      from: env.ALERT_EMAIL_FROM,
+      from: fromOneTrack(env.ALERT_EMAIL_FROM),
       to,
       subject: alerts.length === 1 ? pick(language, EMAIL_COPY).one(alerts[0]!.vehicleName) : pick(language, EMAIL_COPY).many(alerts.length),
       html: renderAlertEmailHtml(orgName, alerts, language),
@@ -144,14 +150,14 @@ export async function sendLoginCodeEmail(to: string, code: string, language: Lan
   const copy = pick(language, LOGIN_CODE_COPY);
   try {
     const { error } = await resend.emails.send({
-      from: env.AUTH_EMAIL_FROM,
+      from: fromOneTrack(env.AUTH_EMAIL_FROM),
       to,
       subject: copy.subject(code),
       html: `
         <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f6fb;padding:32px 16px;">
           <div style="max-width:420px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 1px 2px rgba(15,23,42,0.06);">
             <div style="background:linear-gradient(135deg,#38bdf8,#3b82f6,#7c3aed);padding:20px 24px;">
-              <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;">OneSystec</p>
+              <p style="margin:0;color:#ffffff;font-size:18px;font-weight:700;">OneTrack</p>
               <p style="margin:2px 0 0;color:#e0e7ff;font-size:13px;">${copy.heading}</p>
             </div>
             <div style="padding:24px;">
