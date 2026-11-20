@@ -351,6 +351,13 @@
       "when": 1794773713233,
       "tag": "0049_oauth_grant_vehicles",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1794860000000,
+      "tag": "0050_velocity_clock_to_utc",
+      "breakpoints": true
     }
   ]
 }

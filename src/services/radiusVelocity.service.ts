@@ -4,6 +4,7 @@ import { logger } from "../config/logger.js";
 import { db } from "../db/client.js";
 import { deviceEvents, devices, positions, vehicles } from "../db/schema/index.js";
 import { invalidateDeviceFleets } from "../realtime/deviceFleet.js";
+import { italianWallClockToInstant } from "./fleetTime.js";
 import { publishPosition } from "../realtime/gateway.js";
 import { AVL_ID } from "../tcp-server/codec8/avlIds.js";
 
@@ -149,7 +150,8 @@ export async function pruneRadiusHistory(now: Date = new Date()): Promise<number
 }
 
 async function syncDevicePosition(orgId: string, deviceId: string, rv: RvDevice): Promise<void> {
-  const ts = new Date(Number(rv.timestamp) * 1000);
+  // Velocity's timestamp is the Italian wall clock written as if it were UTC (1-2 h ahead of the real moment): convert it to the real instant.
+  const ts = italianWallClockToInstant(Number(rv.timestamp) * 1000);
   const ignitionOn = rv.ignition === "Y";
 
   const [lastPosition] = await db
